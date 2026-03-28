@@ -1,0 +1,1994 @@
+#include <Arduino.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+#include <SPI.h>
+#include <SD.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
+#include <esp_sleep.h>
+#include <time.h>
+
+#include <Adafruit_NeoPixel.h>
+
+#include <TFT_eSPI.h>
+
+// ESP32-audioI2S (Schreibfaul1)
+#include <Audio.h>
+
+// -------------------- Pins (ESP32-S3 DevKit) --------------------
+// SPI bus shared by ST7789 + SD (as per your wiring)
+#define SPI_MOSI 11
+#define SPI_SCLK 12
+#define SPI_MISO 13
+
+#define SD_CS    10
+
+// I2S pins: choose pins that do NOT conflict with your TFT pins
+// NOTE: You had TFT_RST on GPIO14 earlier, so don't use 14 for I2S here.
+#define I2S_BCLK 5
+#define I2S_LRC  6
+#define I2S_DOUT 7
+
+// LED ring (24 LEDs) data pin (change if needed)
+#define LED_PIN  21
+#define LED_COUNT 24
+
+// Provisioning button (BOOT on many ESP32-S3 devkits)
+#define PROV_BUTTON_PIN 0
+
+// -------------------- WiFi --------------------
+const char* ssid = "IIIT-Guest";      // fallback if no saved credentials
+const char* password = "f6s68VHJ89mC"; // fallback if no saved credentials
+
+static const char* kProvSsid = "ESP32-S3-Setup";
+static const char* kProvPass = "12345678";
+
+static const long kGmtOffsetSec = 19800;      // IST default (UTC+5:30). Change if needed.
+static const int  kDaylightOffsetSec = 0;
+
+// -------------------- Globals --------------------
+WebServer server(80);
+Audio audio;
+Adafruit_NeoPixel ring(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+TFT_eSPI tft = TFT_eSPI();
+
+Preferences prefs;
+
+bool     powerOn = true;
+String   currentFilename = "";
+bool     loopEnabled = false;
+bool     pendingLoopRestart = false;
+
+uint8_t  speakerVolumePct = 75; // 0..100
+uint8_t  exciterVolumePct = 50; // 0..100 (placeholder until exciter is implemented)
+
+String   ledMode = "solid";     // off|solid|frequency
+uint32_t ledColor = 0x00FF00;   // default green
+uint8_t  ledBrightness = 80;    // 0..255
+
+bool provisioningMode = false;
+unsigned long provButtonDownAtMs = 0;
+unsigned long lastDisplayUpdateMs = 0;
+
+// -------------------- Scheduling --------------------
+struct ScheduleItem {
+    uint32_t id = 0;
+    char timeHHMM[6] = "00:00"; // "HH:MM"
+    char filename[96] = "";
+    bool loop = false;
+    bool enabled = true;
+    int lastTriggerYday = -1;
+    int lastTriggerMinuteOfDay = -1;
+};
+
+static constexpr uint8_t kMaxSchedules = 10;
+ScheduleItem schedules[kMaxSchedules];
+uint8_t scheduleCount = 0;
+uint32_t nextScheduleId = 1;
+unsigned long lastScheduleCheckMs = 0;
+int lastSeenMinuteOfDay = -1;
+
+// For multipart uploads
+File uploadFile;
+
+// Shared download buffer (avoid large stack allocations in HTTP handlers)
+static uint8_t gDownloadBuf[1460];
+
+enum class DownloadState : uint8_t {
+    IDLE = 0,
+    STARTING,
+    RUNNING,
+    SUCCESS,
+    ERROR
+};
+
+DownloadState downloadState = DownloadState::IDLE;
+String downloadUrl;
+String downloadDest;
+String downloadTmp;
+String downloadError;
+size_t downloadBytes = 0;
+int downloadContent_len = -1;
+int downloadPct = 0;
+unsigned long downloadStartedMs = 0;
+unsigned long downloadLastDataMs = 0;
+unsigned long downloadLastUiMs = 0;
+
+WiFiClient downloadPlainClient;
+WiFiClientSecure downloadSecureClient;
+bool downloadHttps = false;
+File downloadFile;
+SemaphoreHandle_t spiBusMutex = nullptr;
+String downloadHost;
+String downloadPath;
+uint16_t downloadPort = 0;
+bool downloadHeaderDone = false;
+int downloadHttpStatus = 0;
+bool displayPausedForDownload = false;
+
+DownloadState lastDisplayDownloadState = DownloadState::IDLE;
+int lastDisplayDownloadPct = -1;
+size_t lastDisplayDownloadBytes = (size_t)-1;
+String lastDisplaySavedName = "";
+String lastDisplayError = "";
+
+static inline bool isDownloadActive() {
+    return downloadState == DownloadState::STARTING || downloadState == DownloadState::RUNNING;
+}
+
+// -------------------- REST API forward declarations --------------------
+void apiStatus();
+void apiPowerToggle();
+void apiBattery();
+
+void apiMediaFiles();
+void apiMediaPlay();
+void apiMediaStop();
+void apiMediaPause();
+void apiMediaSeek();
+void apiMediaCurrent();
+void apiMediaUploadDone();
+void apiMediaUploadHandle();
+void apiMediaDownload();
+void apiMediaDownloadStatus();
+
+void apiVolumeSpeaker();
+void apiVolumeExciter();
+
+void apiLedMode();
+void apiLedColor();
+void apiLedBrightness();
+
+void apiSchedulePlaybackCreate();
+void apiScheduleList();
+void apiScheduleDelete();
+void apiSleep();
+
+void apiDisplayTest();
+
+// -------------------- Helpers --------------------
+static String jsonError(const String& msg) {
+    StaticJsonDocument<128> doc;
+    doc["error"] = msg;
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
+static bool isButtonPressed(uint8_t pin) {
+    return digitalRead(pin) == LOW;
+}
+
+static void prefsBegin() {
+    if (!prefs.isKey("_init")) {
+        // If namespace is fresh, mark it initialized.
+        prefs.putBool("_init", true);
+    }
+}
+
+static bool loadSavedWiFi(String& outSsid, String& outPass) {
+    outSsid = prefs.getString("ssid", "");
+    outPass = prefs.getString("pass", "");
+    return outSsid.length() > 0;
+}
+
+static void saveWiFi(const String& inSsid, const String& inPass) {
+    prefs.putString("ssid", inSsid);
+    prefs.putString("pass", inPass);
+}
+
+static bool connectWiFiSTA(const String& staSsid, const String& staPass, uint32_t timeoutMs = 15000) {
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.begin(staSsid.c_str(), staPass.c_str());
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeoutMs) {
+        delay(250);
+    }
+    return WiFi.status() == WL_CONNECTED;
+}
+
+static void startProvisioningAP();
+static bool startPlayback(const String& filename);
+static void drawStatusLine(uint16_t y, const String& text, uint16_t color = TFT_WHITE, uint16_t bg = TFT_BLACK);
+static bool initSdWithRetries();
+static void updateDisplay();
+static void downloadResetState();
+static void downloadFail(const String& msg);
+static bool beginDownloadJob(const String& url, const String& dest);
+static void processDownloadJob();
+static bool lockSpiBus(uint32_t timeoutMs = 100);
+static void unlockSpiBus();
+static bool parseHttpUrl(const String& url, bool& outHttps, String& outHost, uint16_t& outPort, String& outPath);
+
+static bool ensureTimeSynced(uint32_t timeoutMs = 10000) {
+    configTime(kGmtOffsetSec, kDaylightOffsetSec, "pool.ntp.org", "time.nist.gov");
+    uint32_t start = millis();
+    struct tm timeinfo;
+    while (!getLocalTime(&timeinfo) && (millis() - start) < timeoutMs) {
+        delay(200);
+    }
+    return getLocalTime(&timeinfo);
+}
+
+static bool parseHHMM(const char* hhmm, int& outHour, int& outMin) {
+    if (!hhmm) return false;
+    if (strlen(hhmm) != 5 || hhmm[2] != ':') return false;
+    if (!isDigit(hhmm[0]) || !isDigit(hhmm[1]) || !isDigit(hhmm[3]) || !isDigit(hhmm[4])) return false;
+    outHour = (hhmm[0] - '0') * 10 + (hhmm[1] - '0');
+    outMin = (hhmm[3] - '0') * 10 + (hhmm[4] - '0');
+    if (outHour < 0 || outHour > 23) return false;
+    if (outMin < 0 || outMin > 59) return false;
+    return true;
+}
+
+static int minuteOfDayFromTm(const struct tm& t) {
+    return t.tm_hour * 60 + t.tm_min;
+}
+
+static void scheduleLoadFromPrefs() {
+    scheduleCount = 0;
+    nextScheduleId = 1;
+    String json = prefs.getString("sched", "");
+    if (json.length() == 0) return;
+
+    StaticJsonDocument<2048> doc;
+    if (deserializeJson(doc, json) != DeserializationError::Ok) return;
+    JsonArray arr = doc["schedules"].as<JsonArray>();
+    if (arr.isNull()) return;
+
+    for (JsonVariant v : arr) {
+        if (scheduleCount >= kMaxSchedules) break;
+        ScheduleItem& it = schedules[scheduleCount];
+        it.id = v["id"] | 0;
+        const char* t = v["time"] | "00:00";
+        const char* f = v["filename"] | "";
+        it.loop = v["loop"] | false;
+        it.enabled = v["enabled"] | true;
+        strlcpy(it.timeHHMM, t, sizeof(it.timeHHMM));
+        strlcpy(it.filename, f, sizeof(it.filename));
+        it.lastTriggerYday = -1;
+        it.lastTriggerMinuteOfDay = -1;
+        scheduleCount++;
+        if (it.id >= nextScheduleId) nextScheduleId = it.id + 1;
+    }
+}
+
+static void scheduleSaveToPrefs() {
+    StaticJsonDocument<2048> doc;
+    JsonArray arr = doc.createNestedArray("schedules");
+    for (uint8_t i = 0; i < scheduleCount; i++) {
+        const ScheduleItem& it = schedules[i];
+        JsonObject o = arr.createNestedObject();
+        o["id"] = it.id;
+        o["time"] = it.timeHHMM;
+        o["filename"] = it.filename;
+        o["loop"] = it.loop;
+        o["enabled"] = it.enabled;
+    }
+    String out;
+    serializeJson(doc, out);
+    prefs.putString("sched", out);
+}
+
+static void scheduleMaybeTrigger() {
+    if (!powerOn) return;
+    if (scheduleCount == 0) return;
+    if (millis() - lastScheduleCheckMs < 1000) return;
+    lastScheduleCheckMs = millis();
+
+    struct tm now;
+    if (!getLocalTime(&now)) return;
+    int mod = minuteOfDayFromTm(now);
+    if (mod == lastSeenMinuteOfDay) return;
+    lastSeenMinuteOfDay = mod;
+
+    char hhmm[6];
+    snprintf(hhmm, sizeof(hhmm), "%02d:%02d", now.tm_hour, now.tm_min);
+    for (uint8_t i = 0; i < scheduleCount; i++) {
+        ScheduleItem& it = schedules[i];
+        if (!it.enabled) continue;
+        if (strcmp(it.timeHHMM, hhmm) != 0) continue;
+        if (it.lastTriggerYday == now.tm_yday && it.lastTriggerMinuteOfDay == mod) continue;
+
+        loopEnabled = it.loop;
+        pendingLoopRestart = false;
+        bool ok = startPlayback(String(it.filename));
+        if (ok) {
+            it.lastTriggerYday = now.tm_yday;
+            it.lastTriggerMinuteOfDay = mod;
+            Serial.println("Schedule triggered: " + String(it.timeHHMM) + " -> " + String(it.filename));
+        } else {
+            Serial.println("Schedule failed (file missing?): " + String(it.filename));
+        }
+    }
+}
+
+static bool readJsonBody(JsonDocument& doc) {
+    if (!server.hasArg("plain")) {
+        return false;
+    }
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    return !err;
+}
+
+static String normalizePath(String filename) {
+    filename.trim();
+    if (filename.length() == 0) return String("/");
+    if (!filename.startsWith("/")) filename = "/" + filename;
+    // basic traversal prevention
+    if (filename.indexOf("..") >= 0) return String("/");
+    return filename;
+}
+
+static String toLowerAscii(String in) {
+    for (size_t i = 0; i < in.length(); i++) {
+        char c = in[i];
+        if (c >= 'A' && c <= 'Z') in.setCharAt(i, c - 'A' + 'a');
+    }
+    return in;
+}
+
+static bool removePathCaseInsensitive(const String& fullPath) {
+    String target = normalizePath(fullPath);
+    if (target == "/") return false;
+
+    // Fast path exact match
+    if (SD.exists(target)) {
+        return SD.remove(target);
+    }
+
+    // Case-insensitive scan in root (all our media files are stored in root)
+    File root = SD.open("/");
+    // Keep this bounded (time + resources) to avoid wedging the SD stack.
+    const uint32_t startMs = millis();
+    if (!root || !root.isDirectory()) {
+        if (root) root.close();
+        return false;
+    }
+
+    String targetLower = toLowerAscii(target);
+    bool removed = false;
+    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
+        if (millis() - startMs > 2000) {
+            break;
+        }
+        if (!f.isDirectory()) {
+            String name = String(f.name());
+            if (!name.startsWith("/")) name = "/" + name;
+            if (toLowerAscii(name) == targetLower) {
+                removed = SD.remove(name);
+                f.close();
+                break;
+            }
+        }
+        f.close();
+        yield();
+    }
+    root.close();
+    return removed;
+}
+
+static void quiesceSharedSpiForSd() {
+    // Ensure TFT is fully deselected while SD uses the shared SPI bus.
+    #ifdef TFT_CS
+    if (TFT_CS >= 0) {
+        pinMode(TFT_CS, OUTPUT);
+        digitalWrite(TFT_CS, HIGH);
+    }
+    #endif
+
+    // If TFT_eSPI has an active write transaction, end it.
+    // This avoids SD calls blocking on the ESP32 SPI device mutex.
+    tft.endWrite();
+    delay(1);
+}
+
+static bool sdBeginWithFallback() {
+    const uint32_t freqs[] = {8000000, 4000000, 1000000};
+    for (uint8_t i = 0; i < (sizeof(freqs) / sizeof(freqs[0])); i++) {
+        Serial.printf("[DL] SD.begin @ %lu Hz\n", (unsigned long)freqs[i]);
+        // Re-init SPI pins each attempt; TFT libraries sometimes reconfigure SPI.
+        SPI.end();
+        delay(5);
+        SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+        SPI.setFrequency(freqs[i]);
+        pinMode(SPI_MISO, INPUT_PULLUP);
+        pinMode(SD_CS, OUTPUT);
+        digitalWrite(SD_CS, HIGH);
+        quiesceSharedSpiForSd();
+        delay(2);
+        delay(2);
+        // Match the known-good init pattern: SD.begin(cs) uses the global SPI.
+        bool ok = SD.begin(SD_CS);
+        Serial.printf("[DL] SD.begin result: %s\n", ok ? "OK" : "FAIL");
+        if (ok) return true;
+        delay(20);
+    }
+    return false;
+}
+
+static bool ensureSdMountedForDownload() {
+    // Best-effort mount call. On ESP32 this is usually safe to call again
+    // and avoids relying on SD.cardType() which can block if SPI is wedged.
+    SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+    pinMode(SPI_MISO, INPUT_PULLUP);
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+    return sdBeginWithFallback();
+}
+
+static bool openDownloadTempFile() {
+    if (downloadFile) return true;
+
+    Serial.printf("[DL] Opening temp file %s ...\n", downloadTmp.c_str());
+    for (uint8_t attempt = 1; attempt <= 3; attempt++) {
+        if (!lockSpiBus(1500)) {
+            Serial.println("[DL] SPI busy while opening temp file");
+            delay(10);
+            continue;
+        }
+
+        quiesceSharedSpiForSd();
+        bool sdOk = true;
+        if (attempt > 1) {
+            Serial.println("[DL] Retrying with SPI reset + SD.begin");
+            sdOk = sdBeginWithFallback();
+        } else {
+            sdOk = ensureSdMountedForDownload();
+        }
+        if (sdOk) {
+            Serial.println("[DL] SD.open(temp)");
+            // Re-init SPI right before SD.open as well.
+            SPI.end();
+            delay(2);
+            SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+            pinMode(SPI_MISO, INPUT_PULLUP);
+            pinMode(SD_CS, OUTPUT);
+            digitalWrite(SD_CS, HIGH);
+            delay(1);
+            uint32_t t0 = millis();
+            downloadFile = SD.open(downloadTmp, FILE_WRITE);
+            Serial.printf("[DL] SD.open returned (%lums)\n", (unsigned long)(millis() - t0));
+        }
+        unlockSpiBus();
+
+        if (downloadFile) {
+            Serial.println("[DL] Temp file opened");
+            return true;
+        }
+
+        Serial.printf("[DL] Temp file open failed (attempt %u)\n", (unsigned)attempt);
+        delay(50);
+    }
+
+    // Fallback: open destination directly (skip temp+rename).
+    Serial.printf("[DL] Fallback: opening dest directly %s ...\n", downloadDest.c_str());
+    if (lockSpiBus(1500)) {
+        quiesceSharedSpiForSd();
+        (void)sdBeginWithFallback();
+        SPI.end();
+        delay(2);
+        SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+        pinMode(SPI_MISO, INPUT_PULLUP);
+        pinMode(SD_CS, OUTPUT);
+        digitalWrite(SD_CS, HIGH);
+        delay(1);
+        uint32_t t0 = millis();
+        downloadFile = SD.open(downloadDest, FILE_WRITE);
+        Serial.printf("[DL] SD.open(dest) returned (%lums)\n", (unsigned long)(millis() - t0));
+        unlockSpiBus();
+        if (downloadFile) {
+            // Mark temp empty so we don't attempt rename later.
+            downloadTmp = "";
+            Serial.println("[DL] Writing directly to destination file");
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static String urlDecode(const String& in) {
+    String out;
+    out.reserve(in.length());
+    for (size_t i = 0; i < in.length(); i++) {
+        char c = in[i];
+        if (c == '+') {
+            out += ' ';
+            continue;
+        }
+        if (c == '%' && i + 2 < in.length()) {
+            char h1 = in[i + 1];
+            char h2 = in[i + 2];
+            auto hexVal = [](char h) -> int {
+                if (h >= '0' && h <= '9') return h - '0';
+                if (h >= 'a' && h <= 'f') return 10 + (h - 'a');
+                if (h >= 'A' && h <= 'F') return 10 + (h - 'A');
+                return -1;
+            };
+            int v1 = hexVal(h1);
+            int v2 = hexVal(h2);
+            if (v1 >= 0 && v2 >= 0) {
+                out += (char)((v1 << 4) | v2);
+                i += 2;
+                continue;
+            }
+        }
+        out += c;
+    }
+    return out;
+}
+
+static String filenameFromUrl(const String& url) {
+    int q = url.indexOf('?');
+    String path = (q >= 0) ? url.substring(0, q) : url;
+    int slash = path.lastIndexOf('/');
+    String leaf = (slash >= 0) ? path.substring(slash + 1) : path;
+    leaf = urlDecode(leaf);
+    leaf.trim();
+    if (leaf.length() == 0) leaf = "download.mp3";
+    // Keep it simple/safe: replace problematic chars.
+    for (size_t i = 0; i < leaf.length(); i++) {
+        char c = leaf[i];
+        if (c == '"' || c == '\\' || c == ':' || c == '|' || c == '<' || c == '>' || c == '*' || c == '?') {
+            leaf.setCharAt(i, '_');
+        }
+    }
+    return "/" + leaf;
+}
+
+static String extractJsonStringField(const String& raw, const char* key) {
+    if (!key || raw.length() == 0) return "";
+    String needle = String("\"") + key + "\"";
+    int k = raw.indexOf(needle);
+    if (k < 0) return "";
+    int colon = raw.indexOf(':', k + needle.length());
+    if (colon < 0) return "";
+    int firstQuote = raw.indexOf('"', colon + 1);
+    if (firstQuote < 0) return "";
+
+    String out;
+    out.reserve(128);
+    bool esc = false;
+    for (int i = firstQuote + 1; i < raw.length(); i++) {
+        char c = raw[i];
+        if (esc) {
+            out += c;
+            esc = false;
+            continue;
+        }
+        if (c == '\\') {
+            esc = true;
+            continue;
+        }
+        if (c == '"') {
+            return out;
+        }
+        out += c;
+    }
+    return "";
+}
+
+static bool parseHttpUrl(const String& url, bool& outHttps, String& outHost, uint16_t& outPort, String& outPath) {
+    outHttps = false;
+    outHost = "";
+    outPort = 0;
+    outPath = "/";
+
+    String u = url;
+    u.trim();
+    if (u.startsWith("https://")) {
+        outHttps = true;
+        outPort = 443;
+        u.remove(0, 8);
+    } else if (u.startsWith("http://")) {
+        outHttps = false;
+        outPort = 80;
+        u.remove(0, 7);
+    } else {
+        return false;
+    }
+
+    int slash = u.indexOf('/');
+    String hostPort = (slash >= 0) ? u.substring(0, slash) : u;
+    outPath = (slash >= 0) ? u.substring(slash) : String("/");
+    if (outPath.length() == 0) outPath = "/";
+
+    int colon = hostPort.indexOf(':');
+    if (colon >= 0) {
+        outHost = hostPort.substring(0, colon);
+        String p = hostPort.substring(colon + 1);
+        int pi = p.toInt();
+        if (pi <= 0 || pi > 65535) return false;
+        outPort = (uint16_t)pi;
+    } else {
+        outHost = hostPort;
+    }
+
+    outHost.trim();
+    return outHost.length() > 0;
+}
+
+static uint8_t clampPct(int v) {
+    if (v < 0) return 0;
+    if (v > 100) return 100;
+    return (uint8_t)v;
+}
+
+static void applyLedState() {
+    ring.setBrightness(ledBrightness);
+    if (ledMode == "off") {
+        ring.clear();
+        ring.show();
+        return;
+    }
+    if (ledMode == "solid") {
+        for (uint16_t i = 0; i < LED_COUNT; i++) {
+            ring.setPixelColor(i, ledColor);
+        }
+        ring.show();
+        return;
+    }
+    // "frequency" mode is handled in loop() using audio VU
+}
+
+static void initDisplay() {
+    Serial.println("[BOOT] initDisplay() start");
+    // Use TFT_eSPI's configured pins (from your User_Setup.h)
+    // Backlight on (if TFT_BL is defined)
+    #ifdef TFT_BL
+    if (TFT_BL >= 0) {
+        pinMode(TFT_BL, OUTPUT);
+        digitalWrite(TFT_BL, HIGH);
+    }
+    #endif
+
+    // Manual reset sequence (if TFT_RST is defined)
+    #ifdef TFT_RST
+    if (TFT_RST >= 0) {
+        pinMode(TFT_RST, OUTPUT);
+        digitalWrite(TFT_RST, HIGH);
+        delay(50);
+        digitalWrite(TFT_RST, LOW);
+        delay(150);
+        digitalWrite(TFT_RST, HIGH);
+        delay(200);
+    }
+    #endif
+
+    tft.init();
+    tft.setRotation(1);
+    tft.invertDisplay(true); // If colors look wrong/washed, try false.
+    tft.fillScreen(TFT_BLACK);
+    Serial.println("[BOOT] initDisplay() done");
+}
+
+static void drawStatusLine(uint16_t y, const String& text, uint16_t color, uint16_t bg) {
+    if (!lockSpiBus(200)) {
+        return;
+    }
+    tft.setTextColor(color, bg);
+    // Clear a line region to avoid leftover characters.
+    tft.fillRect(0, y, tft.width(), 18, bg);
+    tft.drawString(text, 8, y, 2);
+    unlockSpiBus();
+}
+
+static bool lockSpiBus(uint32_t timeoutMs) {
+    if (spiBusMutex == nullptr) return true;
+    return xSemaphoreTake(spiBusMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
+
+static void unlockSpiBus() {
+    if (spiBusMutex != nullptr) {
+        xSemaphoreGive(spiBusMutex);
+    }
+}
+
+static bool initSdWithRetries() {
+    // Keep TFT fully deselected while mounting SD on shared SPI bus.
+    #ifdef TFT_CS
+    if (TFT_CS >= 0) {
+        pinMode(TFT_CS, OUTPUT);
+        digitalWrite(TFT_CS, HIGH);
+    }
+    #endif
+    #ifdef TFT_DC
+    if (TFT_DC >= 0) {
+        pinMode(TFT_DC, OUTPUT);
+        digitalWrite(TFT_DC, HIGH);
+    }
+    #endif
+    #ifdef TFT_RST
+    if (TFT_RST >= 0) {
+        pinMode(TFT_RST, OUTPUT);
+        digitalWrite(TFT_RST, HIGH);
+    }
+    #endif
+
+    pinMode(SPI_MISO, INPUT_PULLUP);
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+
+    const uint32_t freqs[] = {1000000, 4000000, 8000000};
+    for (uint8_t i = 0; i < (sizeof(freqs) / sizeof(freqs[0])); i++) {
+        uint32_t hz = freqs[i];
+        Serial.printf("[BOOT] SD.begin attempt %u @ %lu Hz\n", (unsigned)(i + 1), (unsigned long)hz);
+        SPI.end();
+        delay(20);
+        SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+        SPI.setFrequency(hz);
+        bool ok = SD.begin(SD_CS);
+        Serial.printf("[BOOT] SD.begin attempt %u result: %s\n", (unsigned)(i + 1), ok ? "OK" : "FAIL");
+        if (ok) return true;
+        delay(100);
+    }
+    return false;
+}
+
+static void updateDisplay() {
+    if (millis() - lastDisplayUpdateMs < 250) return;
+    lastDisplayUpdateMs = millis();
+
+    if (displayPausedForDownload &&
+        (downloadState == DownloadState::STARTING || downloadState == DownloadState::RUNNING)) {
+        return;
+    }
+
+    if (downloadState == DownloadState::IDLE) {
+        return;
+    }
+
+    if (downloadState == DownloadState::STARTING) {
+        if (lastDisplayDownloadState != DownloadState::STARTING) {
+            drawStatusLine(96, "Downloading...", TFT_CYAN, TFT_BLACK);
+            drawStatusLine(114, "Connecting...", TFT_CYAN, TFT_BLACK);
+        }
+    } else if (downloadState == DownloadState::RUNNING) {
+        if (downloadContent_len > 0) {
+            if (downloadPct != lastDisplayDownloadPct || lastDisplayDownloadState != DownloadState::RUNNING) {
+                String line = String("Downloading ") + downloadPct + "%";
+                drawStatusLine(96, line, TFT_CYAN, TFT_BLACK);
+                drawStatusLine(114, "In progress", TFT_CYAN, TFT_BLACK);
+            }
+        } else {
+            if (downloadBytes != lastDisplayDownloadBytes || lastDisplayDownloadState != DownloadState::RUNNING) {
+                String line = String("Downloading ") + (unsigned)downloadBytes + "B";
+                drawStatusLine(96, line, TFT_CYAN, TFT_BLACK);
+                drawStatusLine(114, "In progress", TFT_CYAN, TFT_BLACK);
+            }
+        }
+    } else if (downloadState == DownloadState::SUCCESS) {
+        int slash = downloadDest.lastIndexOf('/');
+        String savedName = (slash >= 0) ? downloadDest.substring(slash + 1) : downloadDest;
+        if (lastDisplayDownloadState != DownloadState::SUCCESS || savedName != lastDisplaySavedName) {
+            String savedMsg = String("Saved as ") + savedName;
+            drawStatusLine(96, "Download 100%", TFT_GREEN, TFT_BLACK);
+            drawStatusLine(114, savedMsg, TFT_GREEN, TFT_BLACK);
+        }
+    } else if (downloadState == DownloadState::ERROR) {
+        if (lastDisplayDownloadState != DownloadState::ERROR || downloadError != lastDisplayError) {
+            drawStatusLine(96, "Download failed", TFT_RED, TFT_BLACK);
+            drawStatusLine(114, downloadError, TFT_RED, TFT_BLACK);
+        }
+    }
+
+    lastDisplayDownloadState = downloadState;
+    lastDisplayDownloadPct = downloadPct;
+    lastDisplayDownloadBytes = downloadBytes;
+    int slash = downloadDest.lastIndexOf('/');
+    lastDisplaySavedName = (slash >= 0) ? downloadDest.substring(slash + 1) : downloadDest;
+    lastDisplayError = downloadError;
+}
+
+static void downloadResetState() {
+    if (downloadFile) {
+        downloadFile.close();
+    }
+    downloadUrl = "";
+    downloadDest = "";
+    downloadTmp = "";
+    downloadError = "";
+    downloadBytes = 0;
+    downloadContent_len = -1;
+    downloadPct = 0;
+    downloadStartedMs = 0;
+    downloadLastDataMs = 0;
+    downloadLastUiMs = 0;
+    downloadHttps = false;
+    downloadHost = "";
+    downloadPath = "/";
+    downloadPort = 0;
+    downloadHeaderDone = false;
+    downloadHttpStatus = 0;
+    displayPausedForDownload = false;
+    downloadState = DownloadState::IDLE;
+    lastDisplayDownloadState = DownloadState::IDLE;
+    lastDisplayDownloadPct = -1;
+    lastDisplayDownloadBytes = (size_t)-1;
+    lastDisplaySavedName = "";
+    lastDisplayError = "";
+}
+
+static void downloadFail(const String& msg) {
+    downloadError = msg;
+    if (downloadFile) {
+        downloadFile.flush();
+        downloadFile.close();
+    }
+    downloadPlainClient.stop();
+    downloadSecureClient.stop();
+    downloadState = DownloadState::ERROR;
+    Serial.println(String("Download failed: ") + msg);
+}
+
+static bool beginDownloadJob(const String& url, const String& dest) {
+    if (!WiFi.isConnected()) {
+        downloadError = "WiFi not connected";
+        downloadState = DownloadState::ERROR;
+        return false;
+    }
+
+    if (downloadState == DownloadState::STARTING || downloadState == DownloadState::RUNNING) {
+        downloadError = "Download already in progress";
+        return false;
+    }
+
+    // Cleanup previous completed/error state.
+    if (downloadState != DownloadState::IDLE) {
+        downloadResetState();
+    }
+
+    // Pause audio while downloading (ESP32-audioI2S can keep SD file handles active).
+    audio.stopSong();
+    pendingLoopRestart = false;
+
+    downloadUrl = url;
+    downloadDest = dest;
+    // Use a unique temp name to avoid SD.remove() (which can hang if SD is busy).
+    // Keep it in root and simple; rename happens at the end.
+    downloadTmp = String("/._dl_") + String((uint32_t)millis(), HEX) + String(".part");
+    downloadError = "";
+    downloadBytes = 0;
+    downloadContent_len = -1;
+    displayPausedForDownload = true;
+    if (lockSpiBus(250)) {
+        quiesceSharedSpiForSd();
+        unlockSpiBus();
+    }
+    downloadPct = 0;
+    downloadStartedMs = millis();
+    downloadLastDataMs = millis();
+    downloadLastUiMs = 0;
+    downloadHttps = url.startsWith("https://");
+    downloadHost = "";
+    downloadPath = "/";
+    downloadPort = 0;
+    downloadHeaderDone = false;
+    downloadHttpStatus = 0;
+    downloadState = DownloadState::STARTING;
+    lastDisplayDownloadState = DownloadState::IDLE;
+    lastDisplayDownloadPct = -1;
+    lastDisplayDownloadBytes = (size_t)-1;
+    Serial.println(String("Download queued: ") + url + " -> " + dest);
+    return true;
+}
+
+static void processDownloadJob() {
+    if (downloadState == DownloadState::IDLE || downloadState == DownloadState::SUCCESS || downloadState == DownloadState::ERROR) {
+        return;
+    }
+
+    if (downloadState == DownloadState::STARTING) {
+        if (millis() - downloadStartedMs > 30000) {
+            downloadFail("Start timeout");
+            return;
+        }
+        Serial.println("Download stage: STARTING");
+        bool urlHttps = false;
+        String host;
+        String path;
+        uint16_t port = 0;
+        Serial.println("Download stage: parse URL");
+        if (!parseHttpUrl(downloadUrl, urlHttps, host, port, path)) {
+            downloadFail("Bad URL format");
+            return;
+        }
+
+        downloadHttps = urlHttps;
+        downloadHost = host;
+        downloadPort = port;
+        downloadPath = path;
+        downloadHeaderDone = false;
+        downloadHttpStatus = 0;
+        downloadContent_len = -1;
+
+        // Do not touch SD in STARTING (avoids SPI/SD blocking before network starts).
+        Serial.println("Download stage: skip SD prep");
+
+        bool connected = false;
+        Serial.printf("Download connecting to %s:%u ...\n", downloadHost.c_str(), downloadPort);
+        if (downloadHttps) {
+            downloadSecureClient.stop();
+            downloadSecureClient.setInsecure();
+            downloadSecureClient.setTimeout(12);
+            connected = downloadSecureClient.connect(downloadHost.c_str(), downloadPort, 12000);
+            if (connected) {
+                Serial.println("Download stage: send HTTPS request");
+                downloadSecureClient.printf(
+                    "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: ESP32-S3\r\n\r\n",
+                    downloadPath.c_str(), downloadHost.c_str());
+            }
+        } else {
+            downloadPlainClient.stop();
+            downloadPlainClient.setTimeout(12);
+            connected = downloadPlainClient.connect(downloadHost.c_str(), downloadPort, 12000);
+            if (connected) {
+                Serial.println("Download stage: send HTTP request");
+                downloadPlainClient.printf(
+                    "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: ESP32-S3\r\n\r\n",
+                    downloadPath.c_str(), downloadHost.c_str());
+            }
+        }
+        if (!connected) {
+            downloadFail("TCP connect failed");
+            return;
+        }
+
+        downloadState = DownloadState::RUNNING;
+        Serial.println("Download request sent");
+        return;
+    }
+
+    if (downloadState != DownloadState::RUNNING) return;
+
+    WiFiClient* stream = downloadHttps ? (WiFiClient*)&downloadSecureClient : (WiFiClient*)&downloadPlainClient;
+
+    if (!downloadHeaderDone) {
+        if (stream->available()) {
+            String line = stream->readStringUntil('\n');
+            line.trim();
+            if (line.startsWith("HTTP/")) {
+                int p1 = line.indexOf(' ');
+                int p2 = (p1 > 0) ? line.indexOf(' ', p1 + 1) : -1;
+                if (p1 > 0) {
+                    String codeStr = (p2 > p1) ? line.substring(p1 + 1, p2) : line.substring(p1 + 1);
+                    downloadHttpStatus = codeStr.toInt();
+                }
+            } else if (line.startsWith("Content-Length:")) {
+                String v = line.substring(strlen("Content-Length:"));
+                v.trim();
+                downloadContent_len = v.toInt();
+            }
+
+            if (line.length() == 0) {
+                downloadHeaderDone = true;
+            }
+            downloadLastDataMs = millis();
+        }
+
+        if (!downloadHeaderDone) {
+            if (!stream->connected() && !stream->available()) {
+                downloadFail("Header connection closed");
+                return;
+            }
+            if (millis() - downloadLastDataMs > 15000) {
+                downloadFail("Header timeout");
+            }
+            return;
+        }
+
+        if (downloadHttpStatus < 200 || downloadHttpStatus >= 300) {
+            downloadFail(String("HTTP ") + downloadHttpStatus);
+            return;
+        }
+
+        Serial.printf("Download started (status=%d, contentLen=%d)\n", downloadHttpStatus, downloadContent_len);
+    }
+
+    int chunkCount = 0;
+    while (chunkCount < 4) {
+        int avail = stream->available();
+        if (avail <= 0) break;
+        int n = stream->readBytes(gDownloadBuf, (size_t)min(avail, (int)sizeof(gDownloadBuf)));
+        if (n <= 0) break;
+
+        if (!downloadFile) {
+            Serial.println("Download stage: open temp file (first chunk)");
+            if (!openDownloadTempFile()) {
+                downloadFail("SD open failed");
+                return;
+            }
+        }
+
+        if (!lockSpiBus(300)) {
+            downloadFail("SPI busy write");
+            return;
+        }
+        size_t written = downloadFile.write(gDownloadBuf, (size_t)n);
+        unlockSpiBus();
+        if (written != (size_t)n) {
+            downloadFail("SD write failed");
+            return;
+        }
+        downloadBytes += (size_t)n;
+        downloadLastDataMs = millis();
+        chunkCount++;
+    }
+
+    if (millis() - downloadLastUiMs >= 400) {
+        downloadLastUiMs = millis();
+        if (downloadContent_len > 0) {
+            int pct = (int)((uint64_t)downloadBytes * 100ULL / (uint64_t)downloadContent_len);
+            if (pct > 100) pct = 100;
+            if (pct != downloadPct) {
+                downloadPct = pct;
+                Serial.printf("Download progress: %d%% (%u/%d bytes)\n", downloadPct, (unsigned)downloadBytes, downloadContent_len);
+            }
+        } else {
+            Serial.printf("Download progress: %u bytes\n", (unsigned)downloadBytes);
+        }
+    }
+
+    bool doneByLength = (downloadContent_len >= 0 && (int)downloadBytes >= downloadContent_len);
+    bool doneByClose = (!stream->connected() && stream->available() == 0);
+
+    if (!doneByLength && !doneByClose) {
+        if (millis() - downloadLastDataMs > 15000) {
+            downloadFail("Stream timeout");
+        }
+        return;
+    }
+
+    if (downloadBytes == 0) {
+        downloadFail("Downloaded 0 bytes");
+        return;
+    }
+
+    if (!downloadFile) {
+        downloadFail("No file handle");
+        return;
+    }
+
+    if (lockSpiBus(500)) {
+        downloadFile.flush();
+        downloadFile.close();
+        unlockSpiBus();
+    } else {
+        downloadFail("SPI busy close");
+        return;
+    }
+
+    downloadPlainClient.stop();
+    downloadSecureClient.stop();
+
+    if (!lockSpiBus(1000)) {
+        downloadFail("SPI busy rename");
+        return;
+    }
+    bool replacedExisting = false;
+    bool renamed = true;
+    if (downloadTmp.length() > 0) {
+        replacedExisting = removePathCaseInsensitive(downloadDest);
+        renamed = SD.rename(downloadTmp, downloadDest);
+    }
+    unlockSpiBus();
+    if (!renamed) {
+        downloadFail("Rename failed");
+        return;
+    }
+
+    downloadPct = 100;
+    downloadState = DownloadState::SUCCESS;
+    displayPausedForDownload = false;
+    int slash = downloadDest.lastIndexOf('/');
+    String savedName = (slash >= 0) ? downloadDest.substring(slash + 1) : downloadDest;
+    if (replacedExisting) {
+        Serial.println(String("Replaced existing file: ") + savedName);
+    }
+    Serial.println(String("Saved as ") + savedName);
+}
+
+// -------------------- Audio event callback (for looping) --------------------
+static void audioInfo(Audio::msg_t info) {
+    if (info.e == Audio::evt_eof) {
+        if (loopEnabled && currentFilename.length() > 0) {
+            pendingLoopRestart = true;
+        }
+    }
+}
+
+static bool startPlayback(const String& filename) {
+    String path = normalizePath(filename);
+    if (path == "/") return false;
+    if (!SD.exists(path)) {
+        return false;
+    }
+    audio.stopSong();
+    bool ok = audio.connecttoFS(SD, path.c_str());
+    if (ok) {
+        currentFilename = path;
+    }
+    return ok;
+}
+
+// -------------------- API: Power & Status --------------------
+void apiStatus() {
+    StaticJsonDocument<768> doc;
+    doc["uptime"] = (uint32_t)(millis() / 1000);
+    doc["powerOn"] = powerOn;
+    doc["ip"] = WiFi.isConnected() ? WiFi.localIP().toString() : String("");
+
+    JsonObject media = doc.createNestedObject("media");
+    media["running"] = audio.isRunning();
+    media["filename"] = currentFilename;
+    media["loop"] = loopEnabled;
+    media["duration"] = audio.getAudioFileDuration();
+    media["position"] = audio.getAudioCurrentTime();
+    media["bitrate"] = audio.getBitRate();
+    media["samplerate"] = audio.getSampleRate();
+    media["channels"] = audio.getChannels();
+
+    JsonObject volume = doc.createNestedObject("volume");
+    volume["speaker"] = speakerVolumePct;
+    volume["exciter"] = exciterVolumePct;
+
+    JsonObject led = doc.createNestedObject("led");
+    led["mode"] = ledMode;
+    char colorBuf[10];
+    snprintf(colorBuf, sizeof(colorBuf), "#%06lX", (unsigned long)(ledColor & 0xFFFFFF));
+    led["color"] = colorBuf;
+    led["brightness"] = ledBrightness;
+
+    JsonObject dl = doc.createNestedObject("download");
+    const char* state = "idle";
+    switch (downloadState) {
+        case DownloadState::IDLE: state = "idle"; break;
+        case DownloadState::STARTING: state = "starting"; break;
+        case DownloadState::RUNNING: state = "running"; break;
+        case DownloadState::SUCCESS: state = "success"; break;
+        case DownloadState::ERROR: state = "error"; break;
+    }
+    dl["state"] = state;
+    dl["filename"] = downloadDest;
+    dl["bytes"] = (uint32_t)downloadBytes;
+    dl["percent"] = downloadPct;
+    if (downloadContent_len >= 0) dl["totalBytes"] = downloadContent_len;
+    if (downloadError.length() > 0) dl["error"] = downloadError;
+
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+void apiPowerToggle() {
+    powerOn = !powerOn;
+    if (!powerOn) {
+        audio.stopSong();
+        pendingLoopRestart = false;
+        loopEnabled = false;
+        currentFilename = "";
+        ring.clear();
+        ring.show();
+    }
+    StaticJsonDocument<128> doc;
+    doc["powerOn"] = powerOn;
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+void apiBattery() {
+    StaticJsonDocument<192> doc;
+    doc["available"] = false;
+    doc["voltage"] = nullptr;
+    doc["percent"] = nullptr;
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+// -------------------- API: Media --------------------
+void apiMediaFiles() {
+    if (isDownloadActive()) {
+        server.send(409, "application/json", jsonError("Download in progress"));
+        return;
+    }
+    File root = SD.open("/");
+    if (!root) {
+        server.send(500, "application/json", jsonError("Failed to open root directory"));
+        return;
+    }
+    if (!root.isDirectory()) {
+        root.close();
+        server.send(500, "application/json", jsonError("Root is not a directory"));
+        return;
+    }
+
+    StaticJsonDocument<4096> doc;
+    JsonArray arr = doc.createNestedArray("files");
+
+    for (File f = root.openNextFile(); f; f = root.openNextFile()) {
+        if (!f.isDirectory()) {
+            JsonObject o = arr.createNestedObject();
+            o["name"] = String(f.name());
+            o["size"] = (uint32_t)f.size();
+        }
+        f.close();
+        yield();
+    }
+    root.close();
+
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+void apiMediaPlay() {
+    if (!powerOn) {
+        server.send(409, "application/json", jsonError("Power is off"));
+        return;
+    }
+    if (isDownloadActive()) {
+        server.send(409, "application/json", jsonError("Download in progress"));
+        return;
+    }
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    const char* filename = req["filename"] | nullptr;
+    if (!filename || String(filename).length() == 0) {
+        server.send(400, "application/json", jsonError("Missing filename"));
+        return;
+    }
+    loopEnabled = req["loop"] | false;
+    pendingLoopRestart = false;
+
+    bool ok = startPlayback(String(filename));
+    if (!ok) {
+        server.send(404, "application/json", jsonError("File not found"));
+        return;
+    }
+    StaticJsonDocument<256> resp;
+    resp["status"] = "playing";
+    resp["filename"] = currentFilename;
+    resp["loop"] = loopEnabled;
+    String out;
+    serializeJson(resp, out);
+    server.send(200, "application/json", out);
+}
+
+void apiMediaDownload() {
+    if (!WiFi.isConnected()) {
+        server.send(503, "application/json", jsonError("WiFi not connected"));
+        return;
+    }
+    if (!powerOn) {
+        server.send(409, "application/json", jsonError("Power is off"));
+        return;
+    }
+
+    String rawBody = server.hasArg("plain") ? server.arg("plain") : String("");
+    Serial.printf("[API] /api/media/download contentLength=%u hasPlain=%s\n",
+                  (unsigned)server.clientContentLength(),
+                  server.hasArg("plain") ? "true" : "false");
+    if (rawBody.length() > 0) {
+        Serial.println(String("[API] raw body: ") + rawBody);
+    }
+
+    String url;
+    String filename;
+
+    StaticJsonDocument<512> req;
+    if (rawBody.length() > 0 && deserializeJson(req, rawBody) == DeserializationError::Ok) {
+        if (req["url"].is<const char*>()) url = String(req["url"].as<const char*>());
+        else if (req["url"].is<String>()) url = req["url"].as<String>();
+
+        if (req["filename"].is<const char*>()) filename = String(req["filename"].as<const char*>());
+        else if (req["filename"].is<String>()) filename = req["filename"].as<String>();
+    }
+
+    if (url.length() == 0 && server.hasArg("url")) url = server.arg("url");
+    if (filename.length() == 0 && server.hasArg("filename")) filename = server.arg("filename");
+
+    if (url.length() == 0 && rawBody.length() > 0) url = extractJsonStringField(rawBody, "url");
+    if (filename.length() == 0 && rawBody.length() > 0) filename = extractJsonStringField(rawBody, "filename");
+
+    url.trim();
+    filename.trim();
+
+    if (url.length() == 0) {
+        Serial.println("[API] /api/media/download -> Missing url");
+        server.send(400, "application/json", jsonError("Missing url"));
+        return;
+    }
+    String dest = (filename.length() > 0)
+                      ? normalizePath(filename)
+                      : filenameFromUrl(url);
+    if (dest == "/") {
+        Serial.println("[API] /api/media/download -> Bad filename");
+        server.send(400, "application/json", jsonError("Bad filename"));
+        return;
+    }
+
+    if (downloadState == DownloadState::STARTING || downloadState == DownloadState::RUNNING) {
+        Serial.println("[API] /api/media/download -> Download already in progress");
+        server.send(409, "application/json", jsonError("Download already in progress"));
+        return;
+    }
+
+    if (!beginDownloadJob(url, dest)) {
+        String msg = downloadError.length() ? downloadError : String("Failed to start download");
+        Serial.println(String("[API] /api/media/download -> Failed to start: ") + msg);
+        server.send(500, "application/json", jsonError(msg));
+        return;
+    }
+
+    StaticJsonDocument<256> resp;
+    resp["status"] = "started";
+    resp["filename"] = dest;
+    resp["url"] = url;
+    String out;
+    serializeJson(resp, out);
+    Serial.println(String("[API] /api/media/download -> 202 started, file=") + dest);
+    server.sendHeader("Connection", "close");
+    server.send(202, "application/json", out);
+}
+
+void apiMediaDownloadStatus() {
+    StaticJsonDocument<512> doc;
+    const char* state = "idle";
+    switch (downloadState) {
+        case DownloadState::IDLE: state = "idle"; break;
+        case DownloadState::STARTING: state = "starting"; break;
+        case DownloadState::RUNNING: state = "running"; break;
+        case DownloadState::SUCCESS: state = "success"; break;
+        case DownloadState::ERROR: state = "error"; break;
+    }
+    doc["state"] = state;
+    doc["filename"] = downloadDest;
+    doc["bytes"] = (uint32_t)downloadBytes;
+    doc["percent"] = downloadPct;
+    if (downloadContent_len >= 0) doc["totalBytes"] = downloadContent_len;
+    if (downloadError.length() > 0) doc["error"] = downloadError;
+    if (downloadState == DownloadState::SUCCESS) {
+        int slash = downloadDest.lastIndexOf('/');
+        String savedName = (slash >= 0) ? downloadDest.substring(slash + 1) : downloadDest;
+        doc["message"] = String("Saved as ") + savedName;
+    }
+    String out;
+    serializeJson(doc, out);
+    server.sendHeader("Connection", "close");
+    server.send(200, "application/json", out);
+}
+
+void apiMediaStop() {
+    audio.stopSong();
+    pendingLoopRestart = false;
+    loopEnabled = false;
+    currentFilename = "";
+    server.send(200, "application/json", "{\"status\":\"stopped\"}");
+}
+
+void apiMediaPause() {
+    if (!audio.isRunning()) {
+        server.send(409, "application/json", jsonError("Nothing playing"));
+        return;
+    }
+    audio.pauseResume();
+    server.send(200, "application/json", "{\"status\":\"toggled\"}");
+}
+
+void apiMediaSeek() {
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    uint32_t position = req["position"] | 0;
+    if (!audio.isRunning()) {
+        server.send(409, "application/json", jsonError("Nothing playing"));
+        return;
+    }
+    bool ok = audio.setAudioPlayTime((uint16_t)position);
+    if (!ok) {
+        server.send(500, "application/json", jsonError("Seek failed"));
+        return;
+    }
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void apiMediaCurrent() {
+    StaticJsonDocument<512> doc;
+    doc["running"] = audio.isRunning();
+    doc["filename"] = currentFilename;
+    doc["duration"] = audio.getAudioFileDuration();
+    doc["position"] = audio.getAudioCurrentTime();
+    doc["bitrate"] = audio.getBitRate();
+    doc["vu"] = audio.getVUlevel();
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+// Upload handler for multipart/form-data
+void apiMediaUploadDone() {
+    // Response is sent after upload finishes (in upload handler)
+    if (isDownloadActive()) {
+        server.send(409, "application/json", jsonError("Download in progress"));
+        return;
+    }
+    if (server.upload().status == UPLOAD_FILE_END) {
+        server.send(200, "application/json", "{\"status\":\"uploaded\"}");
+    } else {
+        server.send(200, "application/json", "{\"status\":\"ok\"}");
+    }
+}
+
+void apiMediaUploadHandle() {
+    HTTPUpload& upload = server.upload();
+    if (isDownloadActive()) {
+        if (uploadFile) {
+            uploadFile.close();
+        }
+        if (upload.status == UPLOAD_FILE_START) {
+            Serial.println("Upload rejected: download in progress");
+        }
+        return;
+    }
+    if (upload.status == UPLOAD_FILE_START) {
+        String filename = normalizePath(upload.filename);
+        if (filename == "/") {
+            Serial.println("Upload rejected: bad filename");
+            return;
+        }
+        Serial.println("Upload start: " + filename);
+        if (SD.exists(filename)) SD.remove(filename);
+        uploadFile = SD.open(filename, FILE_WRITE);
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (uploadFile) {
+            uploadFile.write(upload.buf, upload.currentSize);
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (uploadFile) {
+            uploadFile.flush();
+            uploadFile.close();
+        }
+        Serial.println("Upload end, size: " + String(upload.totalSize));
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        if (uploadFile) {
+            uploadFile.close();
+        }
+        Serial.println("Upload aborted");
+    }
+}
+
+// -------------------- API: Volume --------------------
+void apiVolumeSpeaker() {
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    int level = req["level"] | -1;
+    if (level < 0 || level > 100) {
+        server.send(400, "application/json", jsonError("level must be 0..100"));
+        return;
+    }
+    speakerVolumePct = clampPct(level);
+    // With setVolumeSteps(100), volume maps 1:1 to percent.
+    audio.setVolume(speakerVolumePct);
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void apiVolumeExciter() {
+    // Placeholder until you add a second amplifier/output.
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    int level = req["level"] | -1;
+    if (level < 0 || level > 100) {
+        server.send(400, "application/json", jsonError("level must be 0..100"));
+        return;
+    }
+    exciterVolumePct = (uint8_t)level;
+    server.send(200, "application/json", "{\"status\":\"ok\",\"note\":\"exciter not wired yet\"}");
+}
+
+// -------------------- API: LED --------------------
+static bool parseHexColor(const String& s, uint32_t& outColor) {
+    String t = s;
+    t.trim();
+    if (t.startsWith("#")) t = t.substring(1);
+    if (t.length() != 6) return false;
+    char* endp = nullptr;
+    unsigned long v = strtoul(t.c_str(), &endp, 16);
+    if (!endp || *endp != '\0') return false;
+    outColor = (uint32_t)v;
+    return true;
+}
+
+void apiLedMode() {
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    const char* mode = req["mode"] | nullptr;
+    if (!mode) {
+        server.send(400, "application/json", jsonError("Missing mode"));
+        return;
+    }
+    String m = String(mode);
+    if (m != "off" && m != "solid" && m != "frequency") {
+        server.send(400, "application/json", jsonError("mode must be off|solid|frequency"));
+        return;
+    }
+    ledMode = m;
+    applyLedState();
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void apiLedColor() {
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    const char* color = req["color"] | nullptr;
+    if (!color) {
+        server.send(400, "application/json", jsonError("Missing color"));
+        return;
+    }
+    uint32_t c;
+    if (!parseHexColor(String(color), c)) {
+        server.send(400, "application/json", jsonError("color must be like #RRGGBB"));
+        return;
+    }
+    ledColor = c;
+    applyLedState();
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+void apiLedBrightness() {
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    int b = req["brightness"] | -1;
+    if (b < 0 || b > 255) {
+        server.send(400, "application/json", jsonError("brightness must be 0..255"));
+        return;
+    }
+    ledBrightness = (uint8_t)b;
+    applyLedState();
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+// -------------------- API: Scheduling & Sleep (stubs for now) --------------------
+void apiSchedulePlaybackCreate() {
+    StaticJsonDocument<512> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    const char* timeStr = req["time"] | nullptr;
+    const char* filename = req["filename"] | nullptr;
+    bool loop = req["loop"] | false;
+    bool enabled = req["enabled"] | true;
+
+    int h, m;
+    if (!timeStr || !parseHHMM(timeStr, h, m)) {
+        server.send(400, "application/json", jsonError("time must be HH:MM"));
+        return;
+    }
+    if (!filename || String(filename).length() == 0) {
+        server.send(400, "application/json", jsonError("Missing filename"));
+        return;
+    }
+    if (scheduleCount >= kMaxSchedules) {
+        server.send(409, "application/json", jsonError("Schedule list full"));
+        return;
+    }
+
+    ScheduleItem& it = schedules[scheduleCount++];
+    it.id = nextScheduleId++;
+    snprintf(it.timeHHMM, sizeof(it.timeHHMM), "%02d:%02d", h, m);
+    String path = normalizePath(String(filename));
+    strlcpy(it.filename, path.c_str(), sizeof(it.filename));
+    it.loop = loop;
+    it.enabled = enabled;
+    it.lastTriggerYday = -1;
+    it.lastTriggerMinuteOfDay = -1;
+
+    scheduleSaveToPrefs();
+
+    StaticJsonDocument<256> resp;
+    resp["status"] = "created";
+    resp["id"] = it.id;
+    String out;
+    serializeJson(resp, out);
+    server.send(200, "application/json", out);
+}
+
+void apiScheduleList() {
+    StaticJsonDocument<2048> doc;
+    JsonArray arr = doc.createNestedArray("schedules");
+    for (uint8_t i = 0; i < scheduleCount; i++) {
+        const ScheduleItem& it = schedules[i];
+        JsonObject o = arr.createNestedObject();
+        o["id"] = it.id;
+        o["time"] = it.timeHHMM;
+        o["filename"] = it.filename;
+        o["loop"] = it.loop;
+        o["enabled"] = it.enabled;
+    }
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+}
+
+void apiScheduleDelete() {
+    uint32_t id = 0;
+    if (server.hasArg("id")) {
+        id = (uint32_t)server.arg("id").toInt();
+    } else if (server.hasArg("plain")) {
+        StaticJsonDocument<256> req;
+        if (deserializeJson(req, server.arg("plain")) == DeserializationError::Ok) {
+            id = req["id"] | 0;
+        }
+    }
+    if (id == 0) {
+        server.send(400, "application/json", jsonError("Missing id"));
+        return;
+    }
+    int found = -1;
+    for (uint8_t i = 0; i < scheduleCount; i++) {
+        if (schedules[i].id == id) {
+            found = (int)i;
+            break;
+        }
+    }
+    if (found < 0) {
+        server.send(404, "application/json", jsonError("Schedule not found"));
+        return;
+    }
+    for (uint8_t i = (uint8_t)found; i + 1 < scheduleCount; i++) {
+        schedules[i] = schedules[i + 1];
+    }
+    scheduleCount--;
+    scheduleSaveToPrefs();
+    server.send(200, "application/json", "{\"status\":\"deleted\"}");
+}
+
+void apiSleep() {
+    StaticJsonDocument<256> req;
+    if (!readJsonBody(req)) {
+        server.send(400, "application/json", jsonError("Invalid JSON body"));
+        return;
+    }
+    const char* wakeTime = req["wakeTime"] | nullptr;
+    int h, m;
+    if (!wakeTime || !parseHHMM(wakeTime, h, m)) {
+        server.send(400, "application/json", jsonError("wakeTime must be HH:MM"));
+        return;
+    }
+    struct tm now;
+    if (!getLocalTime(&now)) {
+        server.send(503, "application/json", jsonError("Time not synced"));
+        return;
+    }
+    int nowSec = now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec;
+    int targetSec = h * 3600 + m * 60;
+    int deltaSec = targetSec - nowSec;
+    if (deltaSec <= 0) {
+        deltaSec += 24 * 3600;
+    }
+
+    StaticJsonDocument<256> resp;
+    resp["status"] = "sleeping";
+    resp["wakeInSeconds"] = deltaSec;
+    String out;
+    serializeJson(resp, out);
+    server.send(200, "application/json", out);
+    delay(200);
+
+    audio.stopSong();
+    ring.clear();
+    ring.show();
+
+    esp_sleep_enable_timer_wakeup((uint64_t)deltaSec * 1000000ULL);
+    esp_deep_sleep_start();
+}
+
+// -------------------- API: Display (simple test) --------------------
+void apiDisplayTest() {
+    tft.fillScreen(TFT_GREEN);
+    tft.setTextColor(TFT_BLACK, TFT_GREEN);
+    tft.drawString("DISPLAY OK", 20, 20, 4);
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+// -------------------- Provisioning --------------------
+static const char kProvPage[] PROGMEM =
+    "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>ESP32-S3 Setup</title>"
+    "<style>body{font-family:system-ui;margin:24px}input{width:100%;padding:10px;margin:8px 0}button{padding:10px 14px}</style>"
+    "</head><body>"
+    "<h2>WiFi Setup</h2>"
+    "<p>Enter your home WiFi credentials.</p>"
+    "<form method='POST' action='/save'>"
+    "<label>SSID</label><input name='ssid' />"
+    "<label>Password</label><input name='pass' type='password' />"
+    "<button type='submit'>Save & Restart</button>"
+    "</form>"
+    "</body></html>";
+
+static void startProvisioningAP() {
+    provisioningMode = true;
+    audio.stopSong();
+    currentFilename = "";
+    loopEnabled = false;
+    pendingLoopRestart = false;
+
+    WiFi.disconnect(true);
+    delay(200);
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(kProvSsid, kProvPass);
+    IPAddress ip = WiFi.softAPIP();
+    Serial.println("Provisioning AP started");
+    Serial.println(String("SSID: ") + kProvSsid);
+    Serial.println(String("PASS: ") + kProvPass);
+    Serial.print("Open: http://");
+    Serial.println(ip);
+
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.drawString("SETUP MODE", 8, 8, 2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.drawString(String("SSID: ") + kProvSsid, 8, 30, 2);
+    tft.drawString(String("PASS: ") + kProvPass, 8, 52, 2);
+    tft.drawString(String("http://") + ip.toString(), 8, 74, 2);
+
+    server.on("/", HTTP_GET, []() {
+        server.send(200, "text/html", FPSTR(kProvPage));
+    });
+    server.on("/save", HTTP_POST, []() {
+        String newSsid = server.arg("ssid");
+        String newPass = server.arg("pass");
+        newSsid.trim();
+        if (newSsid.length() == 0) {
+            server.send(400, "text/plain", "SSID required");
+            return;
+        }
+        saveWiFi(newSsid, newPass);
+        server.send(200, "text/plain", "Saved. Rebooting...");
+        delay(500);
+        ESP.restart();
+    });
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(200);
+    Serial.println("ESP32-S3 Media Device (ESP32-audioI2S) starting...");
+
+    spiBusMutex = xSemaphoreCreateMutex();
+    if (spiBusMutex == nullptr) {
+        Serial.println("WARNING: Failed to create SPI mutex");
+    }
+
+    // SPI init for SD (shared with TFT wiring)
+    Serial.println("[BOOT] Step: SPI.begin");
+    SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+
+    // Ensure chip selects are deasserted before touching the bus
+    pinMode(SD_CS, OUTPUT);
+    digitalWrite(SD_CS, HIGH);
+    #ifdef TFT_CS
+    if (TFT_CS >= 0) {
+        pinMode(TFT_CS, OUTPUT);
+        digitalWrite(TFT_CS, HIGH);
+    }
+    #endif
+
+    Serial.println("[BOOT] Step: SD.begin");
+    bool sdOk = false;
+    if (lockSpiBus(1000)) {
+        sdOk = initSdWithRetries();
+        unlockSpiBus();
+    }
+    Serial.printf("[BOOT] SD init final: %s\n", sdOk ? "true" : "false");
+    if (!sdOk) {
+        Serial.println("ERROR: SD Card Mount Failed!");
+        // Try to show error on display after SD attempts are finished.
+        initDisplay();
+        tft.fillScreen(TFT_RED);
+        tft.setTextColor(TFT_WHITE, TFT_RED);
+        tft.drawString("SD Mount Failed", 8, 8, 2);
+        while (true) delay(1000);
+    }
+    Serial.println("SD Card initialized successfully");
+
+    // Display init after SD mount so SD can't be blocked by TFT SPI state.
+    Serial.println("[BOOT] Step: Display init");
+    initDisplay();
+    drawStatusLine(8, "Booting...", TFT_WHITE, TFT_BLACK);
+    drawStatusLine(30, "SD OK", TFT_GREEN, TFT_BLACK);
+
+    pinMode(PROV_BUTTON_PIN, INPUT_PULLUP);
+
+    prefs.begin("cfg", false);
+    prefsBegin();
+
+    // LED ring
+    ring.begin();
+    ring.clear();
+    applyLedState();
+
+    // Audio setup
+    Audio::audio_info_callback = audioInfo;
+    audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+    // Use 0..100 volume steps to match the REST API percentage levels.
+    audio.setVolumeSteps(100);
+    audio.setVolume(speakerVolumePct);
+
+    // Provisioning if button held at boot
+    if (isButtonPressed(PROV_BUTTON_PIN)) {
+        Serial.println("Provisioning button held - entering setup mode");
+        startProvisioningAP();
+    } else {
+        // WiFi: try saved creds, else fallback, else provisioning
+        String savedSsid, savedPass;
+        bool hasSaved = loadSavedWiFi(savedSsid, savedPass);
+        bool ok = false;
+        Serial.print("Connecting to WiFi");
+        if (hasSaved) {
+            Serial.print(" (saved)");
+            ok = connectWiFiSTA(savedSsid, savedPass);
+        }
+        if (!ok) {
+            Serial.print(" (fallback)");
+            ok = connectWiFiSTA(String(ssid), String(password));
+        }
+        if (!ok) {
+            Serial.println("\nWiFi connect failed - starting provisioning AP");
+            startProvisioningAP();
+        } else {
+            Serial.println("\nWiFi Connected!");
+            Serial.print("IP Address: ");
+            Serial.println(WiFi.localIP());
+            drawStatusLine(52, "WiFi OK", TFT_GREEN, TFT_BLACK);
+            drawStatusLine(74, WiFi.localIP().toString(), TFT_YELLOW, TFT_BLACK);
+            ensureTimeSynced();
+        }
+    }
+
+    // Load schedules
+    Serial.println("[BOOT] Step: Load schedules");
+    scheduleLoadFromPrefs();
+
+    // REST API routes (per your spec)
+    server.on("/api/status", HTTP_GET, apiStatus);
+    server.on("/api/power/toggle", HTTP_POST, apiPowerToggle);
+    server.on("/api/battery", HTTP_GET, apiBattery);
+
+    server.on("/api/media/files", HTTP_GET, apiMediaFiles);
+    server.on("/api/media/play", HTTP_POST, apiMediaPlay);
+    server.on("/api/media/stop", HTTP_POST, apiMediaStop);
+    server.on("/api/media/pause", HTTP_POST, apiMediaPause);
+    server.on("/api/media/seek", HTTP_POST, apiMediaSeek);
+    server.on("/api/media/current", HTTP_GET, apiMediaCurrent);
+    server.on("/api/media/upload", HTTP_POST, apiMediaUploadDone, apiMediaUploadHandle);
+    server.on("/api/media/download", HTTP_POST, apiMediaDownload);
+    server.on("/api/media/download/status", HTTP_GET, apiMediaDownloadStatus);
+
+    server.on("/api/volume/speaker", HTTP_POST, apiVolumeSpeaker);
+    server.on("/api/volume/exciter", HTTP_POST, apiVolumeExciter);
+
+    server.on("/api/led/mode", HTTP_POST, apiLedMode);
+    server.on("/api/led/color", HTTP_POST, apiLedColor);
+    server.on("/api/led/brightness", HTTP_POST, apiLedBrightness);
+
+    server.on("/api/schedule/playback", HTTP_POST, apiSchedulePlaybackCreate);
+    server.on("/api/schedule/list", HTTP_GET, apiScheduleList);
+    server.on("/api/schedule/delete", HTTP_DELETE, apiScheduleDelete);
+    server.on("/api/sleep", HTTP_POST, apiSleep);
+
+    server.on("/api/display/test", HTTP_GET, apiDisplayTest);
+
+    server.onNotFound([]() {
+        server.send(404, "application/json", jsonError("Not found"));
+    });
+
+    server.begin();
+    Serial.println("REST API Server Started");
+    Serial.println("[BOOT] Done");
+}
+
+void loop() {
+    server.handleClient();
+
+    // Process queued/running download in main loop (simple + reliable)
+    processDownloadJob();
+
+    // Centralized display updater
+    updateDisplay();
+
+    // Keep audio running (but pause during downloads to avoid SD contention)
+    if (!(downloadState == DownloadState::STARTING || downloadState == DownloadState::RUNNING)) {
+        audio.loop();
+    }
+
+    // Loop restart (triggered by EOF callback)
+    if (pendingLoopRestart) {
+        pendingLoopRestart = false;
+        if (!isDownloadActive() && loopEnabled && currentFilename.length() > 0) {
+            startPlayback(currentFilename);
+        }
+    }
+
+    // LED "frequency" mode (simple VU visualization)
+    if (ledMode == "frequency") {
+        if (!(downloadState == DownloadState::STARTING || downloadState == DownloadState::RUNNING)) {
+            // getVUlevel() returns 0..1023 (approx)
+            uint16_t vu = audio.getVUlevel();
+            uint16_t lit = (uint16_t)((uint32_t)vu * LED_COUNT / 1023);
+            ring.setBrightness(ledBrightness);
+            for (uint16_t i = 0; i < LED_COUNT; i++) {
+                if (i < lit) ring.setPixelColor(i, ledColor);
+                else ring.setPixelColor(i, 0);
+            }
+            ring.show();
+        }
+    }
+
+    // Long-press button to enter provisioning (1-3 seconds)
+    if (!provisioningMode) {
+        if (isButtonPressed(PROV_BUTTON_PIN)) {
+            if (provButtonDownAtMs == 0) provButtonDownAtMs = millis();
+            if (millis() - provButtonDownAtMs >= 1200) {
+                Serial.println("Entering provisioning mode (button long-press)");
+                startProvisioningAP();
+                provButtonDownAtMs = 0;
+            }
+        } else {
+            provButtonDownAtMs = 0;
+        }
+    }
+
+    // Schedule trigger (runs once per minute)
+    if (!isDownloadActive()) {
+        scheduleMaybeTrigger();
+    }
+}

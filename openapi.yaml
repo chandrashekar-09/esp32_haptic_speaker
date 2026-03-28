@@ -1,0 +1,514 @@
+openapi: 3.0.3
+info:
+  title: IOT sensor  API
+  description: Complete REST API for ESP32-S3 IOT sensor  with media playback, LED control, and power management
+  version: 1.0.0
+  contact:
+    name: IOT sensor  Project
+    
+servers:
+  - url: http://{device_ip}
+    description: IOT sensor  device on local network
+    variables:
+      device_ip:
+        default: '10.2.143.51'
+        description: Device IP address
+
+tags:
+  - name: Power & Status
+    description: Device power, battery, and general status
+  - name: Media
+    description: Media file management and playback
+  - name: LED Control
+    description: LED ring control and modes
+  - name: Volume
+    description: Audio volume control
+  - name: Schedule
+    description: Playback scheduling and sleep mode
+  - name: WiFi
+    description: WiFi provisioning
+
+paths:
+  /api/status:
+    get:
+      tags: [Power & Status]
+      summary: Get complete device status
+      responses:
+        '200':
+          description: Current device state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceStatus'
+                
+  /api/power/toggle:
+    post:
+      tags: [Power & Status]
+      summary: Toggle device power (button simulation)
+      responses:
+        '200':
+          description: Power toggled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum: [on, off]
+                    
+  /api/battery:
+    get:
+      tags: [Power & Status]
+      summary: Get battery status
+      responses:
+        '200':
+          description: Battery information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatteryStatus'
+                
+  /api/media/upload:
+    post:
+      tags: [Media]
+      summary: Upload media file to SD card
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Upload successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filename:
+                    type: string
+                  size:
+                    type: integer
+                    
+  /api/media/files:
+    get:
+      tags: [Media]
+      summary: List all media files on SD card
+      responses:
+        '200':
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MediaFile'
+                      
+  /api/media/delete:
+    delete:
+      tags: [Media]
+      summary: Delete media file from SD card
+      parameters:
+        - name: filename
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File deleted
+          
+  /api/media/play:
+    post:
+      tags: [Media]
+      summary: Play selected media file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filename:
+                  type: string
+                loop:
+                  type: boolean
+                  default: false
+                duration:
+                  type: integer
+                  description: Loop duration in seconds (0 = infinite)
+      responses:
+        '200':
+          description: Playback started
+          
+  /api/media/stop:
+    post:
+      tags: [Media]
+      summary: Stop current playback
+      responses:
+        '200':
+          description: Playback stopped
+          
+  /api/media/pause:
+    post:
+      tags: [Media]
+      summary: Pause/resume playback
+      responses:
+        '200':
+          description: Playback paused/resumed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paused:
+                    type: boolean
+                    
+  /api/media/seek:
+    post:
+      tags: [Media]
+      summary: Seek to position in current media
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position:
+                  type: integer
+                  description: Position in seconds
+      responses:
+        '200':
+          description: Seeked successfully
+          
+  /api/media/current:
+    get:
+      tags: [Media]
+      summary: Get current playback status
+      responses:
+        '200':
+          description: Current playback info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaybackStatus'
+                
+  /api/volume/speaker:
+    post:
+      tags: [Volume]
+      summary: Set speaker volume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                level:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+      responses:
+        '200':
+          description: Volume set
+          
+  /api/volume/exciter:
+    post:
+      tags: [Volume]
+      summary: Set exciter (haptic) volume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                level:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+      responses:
+        '200':
+          description: Volume set
+          
+  /api/led/mode:
+    post:
+      tags: [LED Control]
+      summary: Set LED ring mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [random, frequency, oled_sync, manual, off]
+      responses:
+        '200':
+          description: LED mode changed
+          
+  /api/led/color:
+    post:
+      tags: [LED Control]
+      summary: Set LED ring color (manual mode)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                color:
+                  type: string
+                  example: "#FF0000"
+                brightness:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+      responses:
+        '200':
+          description: LED color set
+          
+  /api/led/brightness:
+    post:
+      tags: [LED Control]
+      summary: Set LED ring brightness
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brightness:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+      responses:
+        '200':
+          description: Brightness set
+          
+  /api/schedule/playback:
+    post:
+      tags: [Schedule]
+      summary: Schedule media playback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlaybackSchedule'
+      responses:
+        '200':
+          description: Schedule created
+          
+  /api/schedule/list:
+    get:
+      tags: [Schedule]
+      summary: List all schedules
+      responses:
+        '200':
+          description: Schedule list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PlaybackSchedule'
+                      
+  /api/schedule/delete:
+    delete:
+      tags: [Schedule]
+      summary: Delete schedule
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Schedule deleted
+          
+  /api/sleep:
+    post:
+      tags: [Schedule]
+      summary: Enter sleep mode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                wakeTime:
+                  type: string
+                  format: time
+                  example: "07:00"
+      responses:
+        '200':
+          description: Entering sleep mode
+          
+  /api/wifi/scan:
+    get:
+      tags: [WiFi]
+      summary: Scan available WiFi networks
+      responses:
+        '200':
+          description: WiFi networks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  networks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ssid:
+                          type: string
+                        rssi:
+                          type: integer
+                        secured:
+                          type: boolean
+                          
+  /api/wifi/connect:
+    post:
+      tags: [WiFi]
+      summary: Connect to WiFi network
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ssid:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Connected successfully
+
+components:
+  schemas:
+    DeviceStatus:
+      type: object
+      properties:
+        power:
+          type: string
+          enum: [on, off, sleeping]
+        battery:
+          $ref: '#/components/schemas/BatteryStatus'
+        playback:
+          $ref: '#/components/schemas/PlaybackStatus'
+        led:
+          $ref: '#/components/schemas/LEDStatus'
+        volume:
+          type: object
+          properties:
+            speaker:
+              type: integer
+            exciter:
+              type: integer
+        uptime:
+          type: integer
+        freeHeap:
+          type: integer
+          
+    BatteryStatus:
+      type: object
+      properties:
+        percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        voltage:
+          type: number
+          format: float
+        charging:
+          type: boolean
+        full:
+          type: boolean
+          
+    MediaFile:
+      type: object
+      properties:
+        filename:
+          type: string
+        size:
+          type: integer
+        duration:
+          type: integer
+        type:
+          type: string
+          enum: [audio, video]
+          
+    PlaybackStatus:
+      type: object
+      properties:
+        playing:
+          type: boolean
+        paused:
+          type: boolean
+        filename:
+          type: string
+        position:
+          type: integer
+          description: Current position in seconds
+        duration:
+          type: integer
+          description: Total duration in seconds
+        loop:
+          type: boolean
+          
+    LEDStatus:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [random, frequency, oled_sync, manual, off]
+        brightness:
+          type: integer
+        color:
+          type: string
+          
+    PlaybackSchedule:
+      type: object
+      properties:
+        id:
+          type: integer
+        filename:
+          type: string
+        startTime:
+          type: string
+          format: time
+        endTime:
+          type: string
+          format: time
+        days:
+          type: array
+          items:
+            type: string
+            enum: [mon, tue, wed, thu, fri, sat, sun]
+        enabled:
+          type: boolean
+        loop:
+          type: boolean
