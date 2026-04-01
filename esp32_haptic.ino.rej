@@ -1,0 +1,10 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -461,6 +494,7 @@
+     // Create proper FreeRTOS Tasks
+     xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0); // Core 0
+     xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, 2, &audioTaskHandle, 1); // Core 1
++    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, 1, NULL, 0); // Core 0
+ }
+ 
+ // -------------------- FreeRTOS Tasks --------------------

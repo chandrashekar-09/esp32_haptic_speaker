@@ -1,0 +1,50 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -467,6 +467,39 @@
+     }
+ }
+ 
++void taskLEDs(void *pvParameters) {
++    uint8_t hue = 0;
++    while (true) {
++        if (!systemPowerOn) {
++            FastLED.clear();
++            FastLED.show();
++            vTaskDelay(pdMS_TO_TICKS(100));
++            continue;
++        }
++        
++        if (ledMode == "off") {
++            FastLED.clear();
++            FastLED.show();
++        } else if (ledMode == "manual") {
++            long number = strtol(&ledColorHex[1], NULL, 16);
++            int r = number >> 16;
++            int g = number >> 8 & 0xFF;
++            int b = number & 0xFF;
++            fill_solid(leds, NUM_LEDS, CRGB(r, g, b));
++            FastLED.show();
++        } else if (ledMode == "random") {
++            fill_rainbow(leds, NUM_LEDS, hue, 255/NUM_LEDS);
++            FastLED.show();
++            hue++;
++        } else if (ledMode == "frequency" || ledMode == "oled_sync") {
++             // Placeholder for audio visualizer sync
++             fill_solid(leds, NUM_LEDS, CRGB::Blue);
++             FastLED.show();
++        }
++        vTaskDelay(pdMS_TO_TICKS(30)); // ~33 fps
++    }
++}
++
+ // -------------------- FreeRTOS Tasks --------------------
+ void taskWebServer(void *pvParameters) {
+     while (true) {
+@@ -428,6 +461,7 @@
+     // Create proper FreeRTOS Tasks
+     xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0); // Core 0
+     xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, 2, &audioTaskHandle, 1); // Core 1
++    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, 1, NULL, 0); // Core 0
+ }
+ 
+ // -------------------- FreeRTOS Tasks --------------------

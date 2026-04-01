@@ -1,0 +1,142 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -359,6 +359,39 @@
+     }
+ }
+ 
++void taskLEDs(void *pvParameters) {
++    uint8_t hue = 0;
++    while (true) {
++        if (!systemPowerOn) {
++            FastLED.clear();
++            FastLED.show();
++            vTaskDelay(pdMS_TO_TICKS(100));
++            continue;
++        }
++        
++        if (ledMode == "off") {
++            FastLED.clear();
++            FastLED.show();
++        } else if (ledMode == "manual") {
++            long number = strtol(&ledColorHex[1], NULL, 16);
++            int r = number >> 16;
++            int g = number >> 8 & 0xFF;
++            int b = number & 0xFF;
++            fill_solid(leds, NUM_LEDS, CRGB(r, g, b));
++            FastLED.show();
++        } else if (ledMode == "random") {
++            fill_rainbow(leds, NUM_LEDS, hue, 255/NUM_LEDS);
++            FastLED.show();
++            hue++;
++        } else if (ledMode == "frequency" || ledMode == "oled_sync") {
++             // Placeholder for audio visualizer sync
++             fill_solid(leds, NUM_LEDS, CRGB::Blue);
++             FastLED.show();
++        }
++        vTaskDelay(pdMS_TO_TICKS(30)); // ~33 fps
++    }
++}
++
+ // -------------------- Tasks Setup --------------------
+ void setup() {
+     Serial.begin(115200);
+@@ -448,93 +481,2 @@
+     xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, 1, NULL, 0);
+ }
+-
+-// -------------------- FreeRTOS Tasks --------------------
+-void taskWebServer(void *pvParameters) {
+-    while (true) {
+-        server.handleClient();
+-        vTaskDelay(pdMS_TO_TICKS(10));
+-    }
+-}
+-
+-void taskAudio(void *pvParameters) {
+-    while (true) {
+-        if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
+-            bool playing = false;
+-            if (mp3 && xSemaphoreTake(sdMutex, 0)) {  
+-                playing = mp3->loop();
+-                xSemaphoreGive(sdMutex);
+-            } else {
+-                playing = true;
+-            }
+-            
+-            if (!playing) {
+-                String finishedTrack = currentFilename;
+-                bool shouldLoop = loopEnabled;
+-                _stopAudioSafely();
+-                if (shouldLoop && finishedTrack.length() > 0) {
+-                    _startAudioPlayback(finishedTrack, true, 0);
+-                }
+-            }
+-        }
+-        vTaskDelay(1);
+-    }
+-}
+-
+-void taskLEDs(void *pvParameters) {
+-    uint8_t hue = 0;
+-    while (true) {
+-        if (!systemPowerOn) {
+-            FastLED.clear();
+-            FastLED.show();
+-            vTaskDelay(pdMS_TO_TICKS(100));
+-            continue;
+-        }
+-        
+-        if (ledMode == "off") {
+-            FastLED.clear();
+-            FastLED.show();
+-        } else if (ledMode == "manual") {
+-            long number = strtol(&ledColorHex[1], NULL, 16);
+-            int r = number >> 16;
+-            int g = number >> 8 & 0xFF;
+-            int b = number & 0xFF;
+-            fill_solid(leds, NUM_LEDS, CRGB(r, g, b));
+-            FastLED.show();
+-        } else if (ledMode == "random") {
+-            fill_rainbow(leds, NUM_LEDS, hue, 255/NUM_LEDS);
+-            FastLED.show();
+-            hue++;
+-        } else if (ledMode == "frequency" || ledMode == "oled_sync") {
+-             // Placeholder for audio visualizer sync
+-             fill_solid(leds, NUM_LEDS, CRGB::Blue);
+-             FastLED.show();
+-        }
+-        vTaskDelay(pdMS_TO_TICKS(30)); // ~33 fps
+-    }
+-}
+-
+-// -------------------- FreeRTOS Tasks --------------------
+-void taskWebServer(void *pvParameters) {
+-    while (true) {
+-        server.handleClient();
+-        vTaskDelay(pdMS_TO_TICKS(10));
+-    }
+-}
+-
+-void taskAudio(void *pvParameters) {
+-    while (true) {
+-        if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
+-            bool playing = false;
+-            if (mp3 && xSemaphoreTake(sdMutex, 0)) {  
+-                playing = mp3->loop();
+-                xSemaphoreGive(sdMutex);
+-            } else {
+-                playing = true;
+-            }
+-            
+-            if (!playing) {
+-                String finishedTrack = currentFilename;
+-                bool shouldLoop = loopEnabled;
+-                _stopAudioSafely();
+-                if (shouldLoop && finishedTrack.length() > 0) {
+-                    _startAudioPlayback(finishedTrack, true, 0);
+-                }
+-            }
+-        }
+-        vTaskDelay(1);
+-    }
+-}

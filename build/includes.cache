@@ -1,0 +1,1317 @@
+[
+  {
+    "Sourcefile": null,
+    "Include": "",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32"
+  },
+  {
+    "Sourcefile": null,
+    "Include": "",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/variants/esp32s3"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "ArduinoJson.h",
+    "Includepath": "/home/chandrashekar/Arduino/libraries/ArduinoJson/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "Preferences.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Preferences/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "SPI.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SPI/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "SD.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "FS.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/FS/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "WiFi.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "Network.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "WebServer.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "AudioFileSourceSD.h",
+    "Includepath": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Preferences/src/Preferences.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SPI/src/SPI.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD/src/SD.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD/src/sd_diskio.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD/src/sd_diskio_crc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/FS/src/FS.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/FS/src/vfs_api.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/AP.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/STA.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFi.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFiAP.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFiGeneric.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFiMulti.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFiSTA.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFiScan.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src/NetworkClient.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src/NetworkEvents.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src/NetworkInterface.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src/NetworkManager.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src/NetworkServer.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Network/src/NetworkUdp.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/Parsing.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/WebServer.cpp",
+    "Include": "SHA1Builder.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Hash/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/WebServer.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/detail/mimetable.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/middleware/AuthenticationMiddleware.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/middleware/CorsMiddleware.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/middleware/LoggingMiddleware.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/middleware/MiddlewareChain.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceBuffer.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceFS.cpp",
+    "Include": "SPIFFS.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SPIFFS/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceFS.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceFunction.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceHTTPStream.cpp",
+    "Include": "HTTPClient.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/HTTPClient/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceHTTPStream.cpp",
+    "Include": "NetworkClientSecure.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceHTTPStream.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceICYStream.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceID3.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourcePROGMEM.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceSD.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceSPIRAMBuffer.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceSTDIO.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileStream.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorAAC.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorFLAC.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorMIDI.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorMOD.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorMP3.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorMP3a.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorOpus.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorRTTTL.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorTalkie.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorWAV.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioLogger.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputBuffer.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputFilterBiquad.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputFilterDecimate.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputI2S.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputI2SNoDAC.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputMixer.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputPDM.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputPWM.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputSPDIF.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputSPIFFSWAV.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputSTDIO.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputSerialWAV.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutputULP.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/driver/SinglePinI2SDriver.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/bitmath.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/bitreader.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/cpu.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/crc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/fixed.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/float.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/format.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/lpc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/md5.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/memory.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/stream_decoder.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/window.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/aacdec.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/aactabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/bitstream.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/buffers.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/dct4.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/decelmnt.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/dequant.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/fft.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/filefmt.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/huffmanaac.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/hufftabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/imdct.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/noiseless.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/pns.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbr.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrfft.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrfreq.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrhfadj.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrhfgen.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrhuff.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrimdct.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrmath.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrqmf.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrside.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/sbrtabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/stproc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/tns.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-aac/trigtabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/bitstream.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/buffers.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/dct32.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/dequant.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/dqchan.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/huffman.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/hufftabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/imdct.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/mp3dec.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/mp3tabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/polyphase.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/scalfact.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/stproc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/subband.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libhelix-mp3/trigtabs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/bit.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/decoder.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/fixed.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/frame.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/huffman.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/layer3.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/stream.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/synth.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/timer.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/version.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/bands.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/celt.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/celt_decoder.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/celt_lpc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/cwrs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/entcode.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/entdec.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/entenc.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/kiss_fft.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/laplace.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/mathops.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/mdct.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/modes.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/pitch.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/quant_bands.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/rate.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/vq.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/A2NLSF.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/CNG.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/HP_variable_cutoff.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/LPC_analysis_filter.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/LPC_fit.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/LPC_inv_pred_gain.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/LP_variable_cutoff.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF2A.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_VQ.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_VQ_weights_laroia.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_decode.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_del_dec_quant.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_encode.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_stabilize.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/NLSF_unpack.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/PLC.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/VQ_WMat_EC.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/ana_filt_bank_1.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/biquad_alt.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/bwexpander.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/bwexpander_32.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/check_control_input.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/code_signs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/control_SNR.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/control_audio_bandwidth.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/control_codec.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/debug.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/dec_API.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decode_core.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decode_frame.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decode_indices.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decode_parameters.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decode_pitch.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decode_pulses.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/decoder_set_fs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/encode_indices.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/encode_pulses.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/LTP_analysis_filter_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/LTP_scale_ctrl_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/apply_sine_window_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/autocorr_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/burg_modified_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/corrMatrix_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/find_LPC_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/find_LTP_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/find_pred_coefs_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/k2a_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/k2a_Q16_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/process_gains_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/regularize_correlations_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/residual_energy16_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/residual_energy_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/schur64_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/schur_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/vector_ops_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/warped_autocorrelation_FIX.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/gain_quant.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/init_decoder.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/inner_prod_aligned.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/interpolate.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/lin2log.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/log2lin.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/pitch_est_tables.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/process_NLSFs.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/quant_LTP_gains.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_down2.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_down2_3.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_private_AR2.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_private_IIR_FIR.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_private_down_FIR.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_private_up2_HQ.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/resampler_rom.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/shell_coder.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/sigm_Q15.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/sort.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/stereo_LR_to_MS.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/stereo_MS_to_LR.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/stereo_decode_pred.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/stereo_encode_pred.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/stereo_find_predictor.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/stereo_quant_pred.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/sum_sqr_shift.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/table_LSF_cos.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_LTP.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_NLSF_CB_NB_MB.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_NLSF_CB_WB.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_gain.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_other.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_pitch_lag.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/tables_pulses_per_block.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/opus.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/opus_decoder.c",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Hash/src/PBKDF2_HMACBuilder.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Hash/src/SHA1Builder.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Hash/src/SHA2Builder.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Hash/src/SHA3Builder.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SPIFFS/src/SPIFFS.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/HTTPClient/src/HTTPClient.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/NetworkClientSecure.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/ssl_client.cpp",
+    "Include": "",
+    "Includepath": null
+  }
+]

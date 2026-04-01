@@ -1,0 +1,14 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/libraries/ESP8266Audio/libmad/layer3.c.o: \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/layer3.c \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/pgmspace.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/global.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/fixed.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/bit.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/stream.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/frame.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/timer.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/huffman.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/layer3.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/rq_table.dat.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/imdct_s.dat.h

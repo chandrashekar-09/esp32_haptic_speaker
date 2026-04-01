@@ -1,0 +1,26 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/libraries/ESP8266Audio/libopus/src/opus.c.o: \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/opus.c \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../include/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/opus.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../include/opus.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/opus_private.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/fixed_generic.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/celt.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/celt.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/opus_custom.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/../include/opus_custom.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/entenc.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/entcode.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/ecintrin.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/src/../celt/entdec.h

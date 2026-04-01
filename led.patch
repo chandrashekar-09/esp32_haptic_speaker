@@ -1,0 +1,74 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -23,6 +23,10 @@
+ #define I2S_LRC  17
+ #define I2S_DOUT 18
+ 
++// -------------------- LED Pins ----------------
++#define LED_PIN  38
++#define NUM_LEDS 24
++
+ // -------------------- WiFi --------------------
+ const char* ssid = "IIIT-Guest";
+ const char* password = "f6s68VHJ89mC";
+@@ -34,6 +38,13 @@
+ 
+ TaskHandle_t audioTaskHandle = NULL;
+ 
++// -------------------- LED Globals -------------
++CRGB leds[NUM_LEDS];
++String ledMode = "off";
++String ledColorHex = "#000000";
++uint8_t ledBrightness = 100;
++bool systemPowerOn = true;
++
+ uint8_t speakerVolumePct = 75; // Right channel (Speaker)
+ uint8_t exciterVolumePct = 50; // Left channel (Exciter)
+ 
+@@ -176,6 +187,14 @@
+ void handleApiCurrent();
+ void handleApiVolumeSpeaker();
+ void handleApiVolumeExciter();
++void handleApiLedMode();
++void handleApiLedColor();
++void handleApiLedBrightness();
++void handleApiStatus();
++void handleApiPowerToggle();
++void handleApiBattery();
++void handleApiMediaDelete();
++void handleApiMediaUpload();
+ void updateAudioVolumeAndBalance();
+ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0);
+ bool _seekAudioToSeconds(uint32_t positionSec);
+@@ -356,6 +375,13 @@
+     speakerVolumePct = prefs.getUInt("spk_vol", 75);
+     exciterVolumePct = prefs.getUInt("exc_vol", 50);
+ 
++    // Initialize LED system
++    FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
++    ledMode = prefs.getString("led_mode", "random");
++    ledBrightness = prefs.getUInt("led_bright", 100);
++    ledColorHex = prefs.getString("led_color", "#FF0000");
++    FastLED.setBrightness(ledBrightness);
++
+     // Initialize SPI and SD
+     SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
+     SPI.setFrequency(4000000); // 4MHz for stable SD reading with ESP8266Audio
+@@ -386,6 +412,17 @@
+     server.on("/api/media/current", HTTP_GET, handleApiCurrent);
+     server.on("/api/volume/speaker", HTTP_POST, handleApiVolumeSpeaker);
+     server.on("/api/volume/exciter", HTTP_POST, handleApiVolumeExciter);
++    server.on("/api/media/delete", HTTP_DELETE, handleApiMediaDelete);
++    // Note: Upload multipart route isn't easily done in server.on without huge callbacks. Using standard for now.
++    server.on("/api/media/upload", HTTP_POST, [](){ server.send(200, "application/json", "{\"status\":\"Upload done\"}"); }, handleApiMediaUpload);
++
++    server.on("/api/led/mode", HTTP_POST, handleApiLedMode);
++    server.on("/api/led/color", HTTP_POST, handleApiLedColor);
++    server.on("/api/led/brightness", HTTP_POST, handleApiLedBrightness);
++    
++    server.on("/api/status", HTTP_GET, handleApiStatus);
++    server.on("/api/power/toggle", HTTP_POST, handleApiPowerToggle);
++    server.on("/api/battery", HTTP_GET, handleApiBattery);
+     
+     // Explicit OPTIONS handler for CORS preflight (Allows Swagger UI to work)
+     server.onNotFound([]() {

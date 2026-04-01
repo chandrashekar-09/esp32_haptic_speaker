@@ -1,0 +1,50 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -404,41 +404,11 @@
+     server.enableCORS(true);
+     server.begin();
+ 
+-    // HTTP and playback run in same loop/core for deterministic behavior
++    // Create proper FreeRTOS Tasks
++    xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0); // Core 0
++    xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, 2, &audioTaskHandle, 1); // Core 1
+ }
+ 
+-// -------------------- Loop (Core 1) --------------------
++// -------------------- Loop (Unused) --------------------
+ // (Moved _stopAudioSafely up above setup)
+ 
+ void loop() {
+-    // Serve HTTP in same core/context as playback to avoid cross-core races
+-    server.handleClient();
+-
+-    // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
+-    if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
+-        bool playing = false;
+-        
+-        // Use a safe pointer check before calling methods on mp3
+-        if (mp3 && xSemaphoreTake(sdMutex, 0)) {  
+-            playing = mp3->loop();
+-            xSemaphoreGive(sdMutex);
+-        } else {
+-            playing = true; // Pretend it played just this loop to not stop abruptly
+-        }
+-        
+-        if (!playing) {
+-            String finishedTrack = currentFilename;
+-            bool shouldLoop = loopEnabled;
+-            _stopAudioSafely();
+-
+-            if (shouldLoop && finishedTrack.length() > 0) {
+-                Serial.println("Restarting loop...");
+-                _startAudioPlayback(finishedTrack, true, 0);
+-            } else {
+-                Serial.println("Playback finished naturally");
+-            }
+-        }
+-    }
+-
+-    // Relax Core 1 watchdogs (critical for smooth system operation)
+-    vTaskDelay(1);
++    vTaskDelete(NULL); // Delete default Arduino loop task, we use proper FreeRTOS tasks now
+ }

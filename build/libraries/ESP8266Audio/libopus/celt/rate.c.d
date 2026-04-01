@@ -1,0 +1,27 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/libraries/ESP8266Audio/libopus/celt/rate.c.o: \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/rate.c \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/../include/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/modes.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/celt.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/opus_custom.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/../include/opus_custom.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/entenc.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/entcode.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/ecintrin.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/fixed_generic.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/entdec.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/mdct.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/kiss_fft.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/cpu_support.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/cwrs.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/stack_alloc.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/os_support.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/celt/rate.h

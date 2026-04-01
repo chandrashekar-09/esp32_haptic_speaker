@@ -1,0 +1,31 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/libraries/ESP8266Audio/libopus/silk/fixed/schur_FIX.c.o: \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/schur_FIX.c \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../include/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/SigProc_FIX.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../SigProc_FIX.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../typedef.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../resampler_structs.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../macros.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../include/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/../include/opus_types.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/../include/opus_defines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/fixed_generic.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../ecintrin.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/ecintrin.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/arch.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../cpu_support.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../../celt/cpu_support.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../Inlines.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../MacroCount.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libopus/silk/fixed/../MacroDebug.h

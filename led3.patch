@@ -1,0 +1,120 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -750,3 +750,119 @@
+     
+     server.send(200, "application/json", "{\"status\":\"Exciter volume set\"}");
+ }
++
++void handleApiLedMode() {
++    if (!server.hasArg("plain")) {
++        server.send(400, "application/json", "{\"error\":\"No body\"}");
++        return;
++    }
++    DynamicJsonDocument doc(256);
++    deserializeJson(doc, server.arg("plain"));
++    
++    String mode = doc["mode"] | "off";
++    if (mode == "random" || mode == "frequency" || mode == "oled_sync" || mode == "manual" || mode == "off") {
++        ledMode = mode;
++        prefs.putString("led_mode", ledMode);
++        server.send(200, "application/json", "{\"status\":\"LED mode set\"}");
++    } else {
++        server.send(400, "application/json", "{\"error\":\"Invalid mode\"}");
++    }
++}
++
++void handleApiLedColor() {
++    if (!server.hasArg("plain")) return server.send(400, "application/json", "{\"error\":\"No body\"}");
++    DynamicJsonDocument doc(256);
++    deserializeJson(doc, server.arg("plain"));
++    
++    ledColorHex = doc["color"] | ledColorHex;
++    if (doc.containsKey("brightness")) {
++        ledBrightness = doc["brightness"];
++        FastLED.setBrightness(ledBrightness);
++        prefs.putUInt("led_bright", ledBrightness);
++    }
++    prefs.putString("led_color", ledColorHex);
++    ledMode = "manual";
++    prefs.putString("led_mode", "manual");
++    
++    server.send(200, "application/json", "{\"status\":\"LED color set\"}");
++}
++
++void handleApiLedBrightness() {
++    if (!server.hasArg("plain")) return server.send(400, "application/json", "{\"error\":\"No body\"}");
++    DynamicJsonDocument doc(256);
++    deserializeJson(doc, server.arg("plain"));
++    
++    ledBrightness = doc["brightness"] | ledBrightness;
++    FastLED.setBrightness(ledBrightness);
++    prefs.putUInt("led_bright", ledBrightness);
++    
++    server.send(200, "application/json", "{\"status\":\"LED brightness set\"}");
++}
++
++void handleApiStatus() {
++    DynamicJsonDocument doc(1024);
++    
++    doc["power"] = systemPowerOn ? "on" : "off";
++    
++    JsonObject bat = doc.createNestedObject("battery");
++    bat["percent"] = 100; // Placeholder
++    bat["voltage"] = 4.2;
++    bat["charging"] = false;
++    bat["full"] = true;
++    
++    JsonObject pb = doc.createNestedObject("playback");
++    pb["playing"] = (!isPaused && currentMediaType != MEDIA_NONE && currentFilename != "");
++    pb["paused"] = isPaused;
++    pb["filename"] = currentFilename;
++    pb["loop"] = loopEnabled;
++    
++    JsonObject l = doc.createNestedObject("led");
++    l["mode"] = ledMode;
++    l["brightness"] = ledBrightness;
++    l["color"] = ledColorHex;
++    
++    JsonObject v = doc.createNestedObject("volume");
++    v["speaker"] = speakerVolumePct;
++    v["exciter"] = exciterVolumePct;
++    
++    doc["uptime"] = millis() / 1000;
++    doc["freeHeap"] = ESP.getFreeHeap();
++    
++    String response;
++    serializeJson(doc, response);
++    server.send(200, "application/json", response);
++}
++
++void handleApiPowerToggle() {
++    systemPowerOn = !systemPowerOn;
++    if (!systemPowerOn) _stopAudioSafely();
++    server.send(200, "application/json", String("{\"state\":\"") + (systemPowerOn ? "on" : "off") + "\"}");
++}
++
++void handleApiBattery() {
++    // Mocked for MVP
++    server.send(200, "application/json", "{\"percent\":100,\"voltage\":4.2,\"charging\":false,\"full\":true}");
++}
++
++void handleApiMediaDelete() {
++    if (!server.hasArg("filename")) {
++        return server.send(400, "application/json", "{\"error\":\"Missing filename query parameter\"}");
++    }
++    String fname = server.arg("filename");
++    if (!fname.startsWith("/")) fname = "/" + fname;
++    
++    if (fname == currentFilename && !isPaused && currentMediaType != MEDIA_NONE) {
++        return server.send(409, "application/json", "{\"error\":\"File is currently playing\"}");
++    }
++    
++    if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
++        if (SD.remove(fname)) {
++            server.send(200, "application/json", "{\"status\":\"File deleted\"}");
++        } else {
++            server.send(404, "application/json", "{\"error\":\"File not found or locked\"}");
++        }
++        xSemaphoreGive(sdMutex);
++    }
++}

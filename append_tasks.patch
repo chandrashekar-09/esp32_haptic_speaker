@@ -1,0 +1,38 @@
+--- esp32_haptic.ino
++++ esp32_haptic.ino
+@@ -404,4 +404,36 @@
+ void loop() {
+     vTaskDelete(NULL);
+ }
++
++// -------------------- FreeRTOS Tasks --------------------
++void taskWebServer(void *pvParameters) {
++    while (true) {
++        server.handleClient();
++        vTaskDelay(pdMS_TO_TICKS(10));
++    }
++}
++
++void taskAudio(void *pvParameters) {
++    while (true) {
++        if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
++            bool playing = false;
++            if (mp3 && xSemaphoreTake(sdMutex, 0)) {  
++                playing = mp3->loop();
++                xSemaphoreGive(sdMutex);
++            } else {
++                playing = true;
++            }
++            
++            if (!playing) {
++                String finishedTrack = currentFilename;
++                bool shouldLoop = loopEnabled;
++                _stopAudioSafely();
++                if (shouldLoop && finishedTrack.length() > 0) {
++                    _startAudioPlayback(finishedTrack, true, 0);
++                }
++            }
++        }
++        vTaskDelay(1);
++    }
++}

@@ -1,0 +1,9 @@
+#line 1 "/home/chandrashekar/Arduino/esp32_haptic/.vscode/arduino.json"
+{
+    "sketch": "esp32_haptic.ino",
+    "port": "/dev/ttyACM0",
+    "board": "esp32:esp32:esp32s3",
+    "configuration": "PSRAM=opi,FlashSize=16M,PartitionScheme=default_16MB,FlashMode=qio,LoopCore=1,EventsCore=1,USBMode=default",
+    "output": "./build",
+    "programmer": "esptool"
+}

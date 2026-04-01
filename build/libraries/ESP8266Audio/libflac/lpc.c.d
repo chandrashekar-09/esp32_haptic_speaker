@@ -1,0 +1,19 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/libraries/ESP8266Audio/libflac/lpc.c.o: \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/lpc.c \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/FLAC/assert.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/FLAC/format.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/FLAC/export.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/FLAC/ordinals.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/share/compat.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/bitmath.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/pgmspace.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/../FLAC/ordinals.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/../FLAC/assert.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/../share/compat.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/lpc.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/../config.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/cpu.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/float.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/../FLAC/format.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libflac/private/macros.h

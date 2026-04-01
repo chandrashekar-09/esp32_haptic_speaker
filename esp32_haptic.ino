@@ -1,3 +1,4 @@
+#include <FastLED.h>
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
@@ -7,12 +8,14 @@
 #include <WebServer.h>
 
 // ESP-IDF Low-Level I2S
-#include <driver/i2s.h>
+#include <driver/i2s_std.h>
+#include <driver/gpio.h>
 
 // ESP8266Audio Libraries
 #include "AudioFileSourceSD.h"
+#include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
-#include "AudioOutput.h" // Base class only
+#include "AudioOutput.h" // We MUST use Base and rewrite the driver completely for IDF v5
 
 // -------------------- Pins --------------------
 #define SPI_MOSI 11
@@ -24,6 +27,10 @@
 #define I2S_LRC  6
 #define I2S_DOUT 7
 
+// -------------------- LED Pins ----------------
+#define LED_PIN  38
+#define NUM_LEDS 24
+
 // -------------------- WiFi --------------------
 const char* ssid = "IIIT-Guest";
 const char* password = "f6s68VHJ89mC";
@@ -32,6 +39,15 @@ const char* password = "f6s68VHJ89mC";
 WebServer server(80);
 Preferences prefs;
 
+TaskHandle_t audioTaskHandle = NULL;
+
+// -------------------- LED Globals -------------
+CRGB leds[NUM_LEDS];
+String ledMode = "off";
+String ledColorHex = "#000000";
+uint8_t ledBrightness = 100;
+bool systemPowerOn = true;
+
 uint8_t speakerVolumePct = 75; // Right channel (Speaker)
 uint8_t exciterVolumePct = 50; // Left channel (Exciter)
 
@@ -39,12 +55,16 @@ bool loopEnabled = false;
 String currentFilename = "";
 bool isPaused = false;
 
+enum MediaType { MEDIA_NONE, MEDIA_AUDIO, MEDIA_VIDEO };
+MediaType currentMediaType = MEDIA_NONE;
+
 // -------------------- Custom Audio Output --------------------
 // This cleanly splits a single I2S DIN wire into two independent volume-controlled channels
 class AudioOutputHaptic : public AudioOutput {
 private:
     int _bclk, _lrc, _dout;
     int _sampleRate = 44100;
+    i2s_chan_handle_t tx_chan; // IDF v5 channel handle
 public:
     float leftVol = 0.5f;
     float rightVol = 0.75f;
@@ -53,6 +73,7 @@ public:
         _bclk = bclk;
         _lrc = lrc;
         _dout = dout;
+        tx_chan = NULL;
     }
 
     virtual ~AudioOutputHaptic() {
@@ -60,43 +81,68 @@ public:
     }
 
     virtual bool SetRate(int hz) override {
+        if (hz == _sampleRate) return true;
         _sampleRate = hz;
-        i2s_set_sample_rates(I2S_NUM_0, _sampleRate);
+        if (tx_chan) {
+            i2s_channel_disable(tx_chan);
+            i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)_sampleRate);
+            i2s_channel_reconfig_std_clock(tx_chan, &clk_cfg);
+            i2s_channel_enable(tx_chan);
+        }
         return true;
     }
     
-    virtual bool SetBitsPerSample(int bits) { return true; } // Forced to 16-bit
-    virtual bool SetChannels(int channels) override { return true; }  // Forced to Stereo DIN
+    // Base class does not define SetBitsPerSample/SetChannels so we drop 'override' or omit
+    bool SetBitsPerSample(int bits) { return true; } // Forced to 16-bit
+    bool SetChannels(int channels) { return true; }  // Forced to Stereo DIN
 
     virtual bool begin() override {
-        i2s_config_t i2s_config = {
-            .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-            .sample_rate = _sampleRate,
-            .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-            .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
-            // Deep DMA Buffers: Absolutely critical for smooth audio and future video playback
-            .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-            .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-            .dma_buf_count = 8,
-            .dma_buf_len = 512,
-            .use_apll = false,
-            .tx_desc_auto_clear = true
+        // 1. Allocate an I2S TX channel (IDF v5)
+        i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
+        chan_cfg.auto_clear = true; // Auto clear TX buffer
+        esp_err_t err = i2s_new_channel(&chan_cfg, &tx_chan, NULL);
+        if (err != ESP_OK) {
+            Serial.println("I2S channel allocation failed");
+            return false;
+        }
+
+        // 2. Configure for Standard I2S Mode
+        i2s_std_config_t std_cfg = {
+            .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG((uint32_t)_sampleRate),
+            .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+            .gpio_cfg = {
+                .mclk = I2S_GPIO_UNUSED,
+                .bclk = (gpio_num_t)_bclk,
+                .ws = (gpio_num_t)_lrc,
+                .dout = (gpio_num_t)_dout,
+                .din = I2S_GPIO_UNUSED,
+                .invert_flags = {
+                    .mclk_inv = false,
+                    .bclk_inv = false,
+                    .ws_inv = false,
+                },
+            },
         };
-        
-        i2s_pin_config_t pin_config = {
-            .bck_io_num = _bclk,
-            .ws_io_num = _lrc,
-            .data_out_num = _dout,
-            .data_in_num = I2S_PIN_NO_CHANGE
-        };
-        
-        i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-        i2s_set_pin(I2S_NUM_0, &pin_config);
-        i2s_zero_dma_buffer(I2S_NUM_0);
+
+        err = i2s_channel_init_std_mode(tx_chan, &std_cfg);
+        if (err != ESP_OK) {
+            Serial.println("I2S std mode initialization failed");
+            return false;
+        }
+
+        // 3. Enable the channel
+        err = i2s_channel_enable(tx_chan);
+        if (err != ESP_OK) {
+            Serial.println("I2S channel enable failed");
+            return false;
+        }
+
         return true;
     }
 
     virtual bool ConsumeSample(int16_t sample[2]) override {
+        if (!tx_chan) return false;
+        
         int16_t scaled[2];
         // Average L&R to ensure mono source, then scale independently
         int32_t mono = (sample[0] + sample[1]) / 2;
@@ -106,13 +152,13 @@ public:
         scaled[1] = max(-32768, min(32767, (int)(mono * rightVol)));
         
         size_t bytes_written = 0;
-        // Blast perfectly scaled 16-bit frames straight to hardware DMA
-        i2s_write(I2S_NUM_0, &scaled, 4, &bytes_written, portMAX_DELAY);
-        return true;
+        // Non-blocking-ish write keeps control path responsive during rapid API commands
+        esp_err_t err = i2s_channel_write(tx_chan, &scaled, 4, &bytes_written, 0);
+        return err == ESP_OK;
     }
     
     virtual uint16_t ConsumeSamples(int16_t *samples, uint16_t count) override {
-        // We override this to process blocks, but actually just pass them down our math pipeline
+        // We override this to process blocks via our math pipeline
         for (uint16_t i=0; i<count; i++) {
             ConsumeSample(samples + i*2);
         }
@@ -120,12 +166,17 @@ public:
     }
 
     virtual bool stop() override {
-        i2s_driver_uninstall(I2S_NUM_0);
+        if (tx_chan) {
+            i2s_channel_disable(tx_chan);
+            i2s_del_channel(tx_chan);
+            tx_chan = NULL;
+        }
         return true;
     }
 };
 
 AudioFileSourceSD *fileSource = NULL;
+AudioFileSourceID3 *id3Source = NULL;
 AudioGeneratorMP3 *mp3 = NULL;
 AudioOutputHaptic *out = NULL;
 
@@ -134,27 +185,213 @@ void handleApiFiles();
 void handleApiPlay();
 void handleApiStop();
 void handleApiPause();
+void handleApiSeek();
 void handleApiCurrent();
 void handleApiVolumeSpeaker();
 void handleApiVolumeExciter();
+void handleApiLedMode();
+void handleApiLedColor();
+void handleApiLedBrightness();
+void handleApiStatus();
+void handleApiPowerToggle();
+void handleApiBattery();
+void handleApiMediaDelete();
+void handleApiMediaUpload();
 void updateAudioVolumeAndBalance();
+bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0);
+bool _seekAudioToSeconds(uint32_t positionSec);
 
 SemaphoreHandle_t sdMutex = NULL;
-String pendingPlayFilename = "";
-bool pendingPlayFlag = false;
-bool pendingStopFlag = false;
-bool pendingPauseFlag = false;
-SemaphoreHandle_t audioMutex = NULL;
+
+// -------------------- Loop (Core 1) --------------------
+void _stopAudioSafely() {
+    isPaused = true; // Stop play loop entry before deleting memory
+    currentMediaType = MEDIA_NONE;
+
+    if (sdMutex) {
+        xSemaphoreTake(sdMutex, portMAX_DELAY);
+    }
+
+    if (mp3) {
+        if (mp3->isRunning()) mp3->stop();
+        delete mp3;
+        mp3 = NULL;
+    }
+    if (id3Source) {
+        delete id3Source;
+        id3Source = NULL;
+    }
+    if (fileSource) {
+        if (fileSource->isOpen()) fileSource->close();
+        delete fileSource;
+        fileSource = NULL;
+    }
+
+    if (sdMutex) {
+        xSemaphoreGive(sdMutex);
+    }
+
+    currentFilename = "";
+    loopEnabled = false;
+    isPaused = false;
+}
+
+bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte) {
+    _stopAudioSafely();
+
+    xSemaphoreTake(sdMutex, portMAX_DELAY);
+
+    bool success = false;
+    do {
+        Serial.printf("Checking if file exists: %s\n", filename.c_str());
+        if (!SD.exists(filename)) {
+            Serial.println("Play requested but file not found: " + filename);
+            break;
+        }
+
+        String fnameLower = filename;
+        fnameLower.toLowerCase();
+        if (!fnameLower.endsWith(".mp3")) {
+            Serial.println("Unsupported media for Stage 1: " + filename);
+            break;
+        }
+
+        fileSource = new AudioFileSourceSD(filename.c_str());
+        if (!fileSource || !fileSource->isOpen()) {
+            Serial.println("Failed to open media file");
+            break;
+        }
+
+        if (startByte > 0) {
+            uint32_t fileSize = fileSource->getSize();
+            uint32_t clamped = startByte;
+            if (fileSize > 0 && clamped >= fileSize) {
+                clamped = fileSize - 1;
+            }
+            fileSource->seek(clamped, SEEK_SET);
+        }
+
+        id3Source = new AudioFileSourceID3(fileSource);
+        mp3 = new AudioGeneratorMP3();
+        if (!id3Source || !mp3) {
+            Serial.println("Failed to create decoder pipeline");
+            break;
+        }
+
+        if (!mp3->begin(id3Source, out)) {
+            Serial.println("Failed to start MP3 decoder");
+            break;
+        }
+
+        currentMediaType = MEDIA_AUDIO;
+        currentFilename = filename;
+        loopEnabled = loopRequested;
+        isPaused = false;
+        Serial.println("Starting MP3 Audio Decoder...");
+        success = true;
+    } while (false);
+
+    if (!success) {
+        if (mp3) { delete mp3; mp3 = NULL; }
+        if (id3Source) { delete id3Source; id3Source = NULL; }
+        if (fileSource) {
+            if (fileSource->isOpen()) fileSource->close();
+            delete fileSource;
+            fileSource = NULL;
+        }
+        currentMediaType = MEDIA_NONE;
+        currentFilename = "";
+        loopEnabled = false;
+        isPaused = false;
+    }
+
+    xSemaphoreGive(sdMutex);
+    return success;
+}
+
+bool _seekAudioToSeconds(uint32_t positionSec) {
+    if (currentMediaType != MEDIA_AUDIO || currentFilename.length() == 0) {
+        return false;
+    }
+
+    const uint32_t assumedBitrateKbps = 128;
+    uint64_t targetByte = (uint64_t)positionSec * assumedBitrateKbps * 1000ULL / 8ULL;
+    return _startAudioPlayback(currentFilename, loopEnabled, (uint32_t)targetByte);
+}
 
 // -------------------- Tasks --------------------
-void webServerTask(void *pvParameters) {
+void taskWebServer(void *pvParameters) {
     while (true) {
         server.handleClient();
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
-// -------------------- Setup --------------------
+void taskAudio(void *pvParameters) {
+    while (true) {
+        // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
+        if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
+            bool playing = false;
+            
+            // Use a safe pointer check before calling methods on mp3
+            if (mp3 && xSemaphoreTake(sdMutex, 0)) {  
+                playing = mp3->loop();
+                xSemaphoreGive(sdMutex);
+            } else {
+                playing = true; // Pretend it played just this loop to not stop abruptly
+            }
+            
+            if (!playing) {
+                String finishedTrack = currentFilename;
+                bool shouldLoop = loopEnabled;
+                _stopAudioSafely();
+
+                if (shouldLoop && finishedTrack.length() > 0) {
+                    Serial.println("Restarting loop...");
+                    _startAudioPlayback(finishedTrack, true, 0);
+                } else {
+                    Serial.println("Playback finished naturally");
+                }
+            }
+        }
+        vTaskDelay(1); // Relax watchdogs
+    }
+}
+
+void taskLEDs(void *pvParameters) {
+    uint8_t hue = 0;
+    while (true) {
+        if (!systemPowerOn) {
+            FastLED.clear();
+            FastLED.show();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        
+        if (ledMode == "off") {
+            FastLED.clear();
+            FastLED.show();
+        } else if (ledMode == "manual") {
+            long number = strtol(&ledColorHex[1], NULL, 16);
+            int r = number >> 16;
+            int g = number >> 8 & 0xFF;
+            int b = number & 0xFF;
+            fill_solid(leds, NUM_LEDS, CRGB(r, g, b));
+            FastLED.show();
+        } else if (ledMode == "random") {
+            fill_rainbow(leds, NUM_LEDS, hue, 255/NUM_LEDS);
+            FastLED.show();
+            hue++;
+        } else if (ledMode == "frequency" || ledMode == "oled_sync") {
+             // Placeholder for audio visualizer sync
+             fill_solid(leds, NUM_LEDS, CRGB::Blue);
+             FastLED.show();
+        }
+        vTaskDelay(pdMS_TO_TICKS(30)); // ~33 fps
+    }
+}
+
+// -------------------- Tasks Setup --------------------
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -164,6 +401,13 @@ void setup() {
     prefs.begin("settings", false);
     speakerVolumePct = prefs.getUInt("spk_vol", 75);
     exciterVolumePct = prefs.getUInt("exc_vol", 50);
+
+    // Initialize LED system
+    FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+    ledMode = prefs.getString("led_mode", "random");
+    ledBrightness = prefs.getUInt("led_bright", 100);
+    ledColorHex = prefs.getString("led_color", "#FF0000");
+    FastLED.setBrightness(ledBrightness);
 
     // Initialize SPI and SD
     SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
@@ -175,7 +419,6 @@ void setup() {
         Serial.println("SD Card initialized.");
     }
 
-    audioMutex = xSemaphoreCreateMutex();
     sdMutex = xSemaphoreCreateMutex();
 
     // Initialize custom ESP-IDF Direct DMA Audio Pipeline
@@ -184,110 +427,79 @@ void setup() {
     updateAudioVolumeAndBalance();
 
     // Connect WiFi
+    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
     Serial.print("Connecting to WiFi");
-    while (WiFi.status() != WL_CONNECTED) {
+    
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED && retries < 20) {
         delay(500);
         Serial.print(".");
+        retries++;
     }
-    Serial.println("\nWiFi connected.");
-    Serial.println(WiFi.localIP());
+    
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nWiFi connected.");
+        Serial.println(WiFi.localIP());
+    } else {
+        Serial.println("\nWiFi connection failed! Proceeding anyway...");
+    }
 
     // Setup routes
     server.on("/api/media/files", HTTP_GET, handleApiFiles);
     server.on("/api/media/play", HTTP_POST, handleApiPlay);
     server.on("/api/media/stop", HTTP_POST, handleApiStop);
     server.on("/api/media/pause", HTTP_POST, handleApiPause);
+    server.on("/api/media/seek", HTTP_POST, handleApiSeek);
     server.on("/api/media/current", HTTP_GET, handleApiCurrent);
     server.on("/api/volume/speaker", HTTP_POST, handleApiVolumeSpeaker);
     server.on("/api/volume/exciter", HTTP_POST, handleApiVolumeExciter);
+    server.on("/api/media/delete", HTTP_DELETE, handleApiMediaDelete);
+    // Note: Upload multipart route isn't easily done in server.on without huge callbacks. Using standard for now.
+    server.on("/api/media/upload", HTTP_POST, [](){ server.send(200, "application/json", "{\"status\":\"Upload done\"}"); }, handleApiMediaUpload);
+
+    server.on("/api/led/mode", HTTP_POST, handleApiLedMode);
+    server.on("/api/led/color", HTTP_POST, handleApiLedColor);
+    server.on("/api/led/brightness", HTTP_POST, handleApiLedBrightness);
     
+    server.on("/api/status", HTTP_GET, handleApiStatus);
+    server.on("/api/power/toggle", HTTP_POST, handleApiPowerToggle);
+    server.on("/api/battery", HTTP_GET, handleApiBattery);
+    
+    // Explicit OPTIONS handler for CORS preflight (Allows Swagger UI to work)
+    server.onNotFound([]() {
+        if (server.method() == HTTP_OPTIONS) {
+            server.sendHeader("Access-Control-Allow-Origin", "*");
+            server.sendHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+            server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+            server.send(204);
+        } else {
+            server.send(404, "text/plain", "Not Found");
+        }
+    });
+
     // Enable CORS
     server.enableCORS(true);
     server.begin();
 
-    // Pin WebServer task to Core 0
-    xTaskCreatePinnedToCore(
-        webServerTask, 
-        "WebServerTask", 
-        8192, 
-        NULL, 
-        1, 
-        NULL, 
-        0 // Core 0
-    );
+    // Create proper FreeRTOS Tasks
+    xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, 2, &audioTaskHandle, 1);
+    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, 1, NULL, 0);
+
 }
+//                 }
+//             }
+//         }
+//         vTaskDelay(1);
+//     }
+// }
 
 // -------------------- Loop (Core 1) --------------------
-void _stopAudioSafely() {
-    if (mp3 && mp3->isRunning()) {
-        mp3->stop();
-    }
-}
+// (Moved _stopAudioSafely up above setup)
 
 void loop() {
-    // Process IPC commands
-    if (xSemaphoreTake(audioMutex, 0) == pdTRUE) {
-        if (pendingStopFlag) {
-            _stopAudioSafely();
-            isPaused = false;
-            pendingStopFlag = false;
-        }
-        if (pendingPauseFlag) {
-            isPaused = !isPaused;
-            pendingPauseFlag = false;
-        }
-        if (pendingPlayFlag && pendingPlayFilename != "") {
-            _stopAudioSafely();
-            
-            if (fileSource) { delete fileSource; fileSource = NULL; }
-            if (mp3) { delete mp3; mp3 = NULL; }
-
-            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-                Serial.printf("Checking if file exists: %s\n", pendingPlayFilename.c_str());
-                if (SD.exists(pendingPlayFilename)) {
-                    Serial.println("File exists, starting playback...");
-                    fileSource = new AudioFileSourceSD(pendingPlayFilename.c_str());
-                    mp3 = new AudioGeneratorMP3();
-                    mp3->begin(fileSource, out);
-                    isPaused = false;
-                } else {
-                    Serial.println("Play requested but file not found: " + pendingPlayFilename);
-                    currentFilename = "";
-                }
-                xSemaphoreGive(sdMutex);
-            }
-            pendingPlayFlag = false;
-        }
-        xSemaphoreGive(audioMutex);
-    }
-
-    // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
-    if (!isPaused && mp3 && mp3->isRunning()) {
-        bool playing = false;
-        if (xSemaphoreTake(sdMutex, 0)) {  // only process if Core 0 isn't browsing files
-            playing = mp3->loop();
-            xSemaphoreGive(sdMutex);
-        } else {
-            playing = true; // Pretend it played just this loop to not stop abruptly
-        }
-        
-        if (!playing) {
-            mp3->stop();
-            if (loopEnabled && currentFilename.length() > 0) {
-                // Restart seamlessly
-                if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-                    fileSource->close();
-                    fileSource->open(currentFilename.c_str());
-                    mp3->begin(fileSource, out);
-                    xSemaphoreGive(sdMutex);
-                }
-            } else {
-                currentFilename = "";
-                Serial.println("Playback finished");
-            }
-        }
-    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
 // -------------------- Volume Logic --------------------
@@ -359,47 +571,91 @@ void handleApiPlay() {
         return;
     }
 
-    loopEnabled = doc["loop"] | false;
+    bool requestedLoop = doc["loop"] | false;
     if (!filename.startsWith("/")) {
         filename = "/" + filename;
     }
-    
-    currentFilename = filename;
-    
-    if (xSemaphoreTake(audioMutex, portMAX_DELAY)) {
-        pendingPlayFilename = filename;
-        pendingStopFlag = true;
-        pendingPlayFlag = true;
-        xSemaphoreGive(audioMutex);
+
+    Serial.printf("AUDIO_CMD_PLAY: %s loop=%s\n", filename.c_str(), requestedLoop ? "true" : "false");
+    bool ok = _startAudioPlayback(filename, requestedLoop, 0);
+    if (!ok) {
+        server.send(404, "application/json", "{\"error\":\"Failed to start playback\"}");
+        return;
     }
-    
-    server.send(200, "application/json", "{\"status\":\"Playback started\",\"filename\":\"" + filename + "\"}");
+
+    server.send(200, "application/json", "{\"status\":\"Playback configured\",\"filename\":\"" + filename + "\"}");
 }
 
 void handleApiStop() {
-    currentFilename = "";
-    if (xSemaphoreTake(audioMutex, portMAX_DELAY)) {
-        pendingStopFlag = true;
-        xSemaphoreGive(audioMutex);
-    }
+    Serial.println("AUDIO_CMD_STOP");
+    _stopAudioSafely();
     server.send(200, "application/json", "{\"status\":\"Playback stopped\"}");
 }
 
 void handleApiPause() {
-    if (xSemaphoreTake(audioMutex, portMAX_DELAY)) {
-        pendingPauseFlag = true;
-        xSemaphoreGive(audioMutex);
+    Serial.println("AUDIO_CMD_TOGGLE_PAUSE");
+    if (currentMediaType == MEDIA_AUDIO && mp3) {
+        isPaused = !isPaused;
     }
-    server.send(200, "application/json", "{\"status\":\"Pause/Resume toggled\"}");
+    server.send(200, "application/json", String("{\"status\":\"Pause/Resume toggled\",\"paused\":") + (isPaused ? "true}" : "false}"));
+}
+
+void handleApiSeek() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"No body\"}");
+        return;
+    }
+
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, server.arg("plain"))) {
+        server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    int positionSec = doc["position"] | -1;
+    if (positionSec < 0) {
+        server.send(400, "application/json", "{\"error\":\"position must be >= 0\"}");
+        return;
+    }
+
+    Serial.printf("AUDIO_CMD_SEEK: %d sec\n", positionSec);
+    if (!_seekAudioToSeconds((uint32_t)positionSec)) {
+        server.send(409, "application/json", "{\"error\":\"Seek failed\"}");
+        return;
+    }
+
+    server.send(200, "application/json", "{\"status\":\"Seek completed\"}");
 }
 
 void handleApiCurrent() {
     DynamicJsonDocument doc(512);
     
-    doc["playing"] = (mp3 && mp3->isRunning() && !isPaused);
+    doc["playing"] = (!isPaused && currentMediaType == MEDIA_AUDIO && currentFilename != "");
     doc["paused"] = isPaused;
     doc["filename"] = currentFilename;
     doc["loop"] = loopEnabled;
+
+    String typeStr = "none";
+    if (currentMediaType == MEDIA_AUDIO) typeStr = "audio";
+    if (currentMediaType == MEDIA_VIDEO) typeStr = "video";
+    doc["type"] = typeStr;
+
+    if (currentMediaType == MEDIA_AUDIO) {
+        if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+            if (fileSource && fileSource->isOpen()) {
+                uint32_t pos = fileSource->getPos();
+                uint32_t size = fileSource->getSize();
+                doc["position_bytes"] = pos;
+                doc["size_bytes"] = size;
+                doc["position"] = (uint32_t)((uint64_t)pos * 8ULL / 128000ULL);
+                doc["duration"] = (uint32_t)((uint64_t)size * 8ULL / 128000ULL);
+            }
+            if (id3Source) {
+                doc["id3_parsed"] = true; // Ready for album arts down the line
+            }
+            xSemaphoreGive(sdMutex);
+        }
+    }
 
     String response;
     serializeJson(doc, response);
@@ -412,10 +668,18 @@ void handleApiVolumeSpeaker() {
         return;
     }
     DynamicJsonDocument doc(256);
-    deserializeJson(doc, server.arg("plain"));
-    
-    speakerVolumePct = doc["level"] | speakerVolumePct;
-    if (speakerVolumePct > 100) speakerVolumePct = 100;
+    if (deserializeJson(doc, server.arg("plain"))) {
+        server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    int level = doc["level"] | -1;
+    if (level < 0 || level > 100) {
+        server.send(400, "application/json", "{\"error\":\"level must be 0..100\"}");
+        return;
+    }
+
+    speakerVolumePct = (uint8_t)level;
     
     prefs.putUInt("spk_vol", speakerVolumePct);
     updateAudioVolumeAndBalance();
@@ -429,13 +693,171 @@ void handleApiVolumeExciter() {
         return;
     }
     DynamicJsonDocument doc(256);
-    deserializeJson(doc, server.arg("plain"));
-    
-    exciterVolumePct = doc["level"] | exciterVolumePct;
-    if (exciterVolumePct > 100) exciterVolumePct = 100;
+    if (deserializeJson(doc, server.arg("plain"))) {
+        server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+    }
+
+    int level = doc["level"] | -1;
+    if (level < 0 || level > 100) {
+        server.send(400, "application/json", "{\"error\":\"level must be 0..100\"}");
+        return;
+    }
+
+    exciterVolumePct = (uint8_t)level;
 
     prefs.putUInt("exc_vol", exciterVolumePct);
     updateAudioVolumeAndBalance();
     
     server.send(200, "application/json", "{\"status\":\"Exciter volume set\"}");
+}
+
+void handleApiLedMode() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"No body\"}");
+        return;
+    }
+    DynamicJsonDocument doc(256);
+    deserializeJson(doc, server.arg("plain"));
+    
+    String mode = doc["mode"] | "off";
+    if (mode == "random" || mode == "frequency" || mode == "oled_sync" || mode == "manual" || mode == "off") {
+        ledMode = mode;
+        prefs.putString("led_mode", ledMode);
+        server.send(200, "application/json", "{\"status\":\"LED mode set\"}");
+    } else {
+        server.send(400, "application/json", "{\"error\":\"Invalid mode\"}");
+    }
+}
+
+void handleApiLedColor() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"No body\"}");
+        return;
+    }
+    DynamicJsonDocument doc(256);
+    deserializeJson(doc, server.arg("plain"));
+    
+    ledColorHex = doc["color"] | ledColorHex;
+    if (doc.containsKey("brightness")) {
+        ledBrightness = doc["brightness"];
+        FastLED.setBrightness(ledBrightness);
+        prefs.putUInt("led_bright", ledBrightness);
+    }
+    prefs.putString("led_color", ledColorHex);
+    ledMode = "manual";
+    prefs.putString("led_mode", "manual");
+    
+    server.send(200, "application/json", "{\"status\":\"LED color set\"}");
+}
+
+void handleApiLedBrightness() {
+    if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"error\":\"No body\"}");
+        return;
+    }
+    DynamicJsonDocument doc(256);
+    deserializeJson(doc, server.arg("plain"));
+    
+    ledBrightness = doc["brightness"] | ledBrightness;
+    FastLED.setBrightness(ledBrightness);
+    prefs.putUInt("led_bright", ledBrightness);
+    
+    server.send(200, "application/json", "{\"status\":\"LED brightness set\"}");
+}
+
+void handleApiStatus() {
+    DynamicJsonDocument doc(1024);
+    
+    doc["power"] = systemPowerOn ? "on" : "off";
+    
+    JsonObject bat = doc.createNestedObject("battery");
+    bat["percent"] = 100; // Placeholder
+    bat["voltage"] = 4.2;
+    bat["charging"] = false;
+    bat["full"] = true;
+    
+    JsonObject pb = doc.createNestedObject("playback");
+    pb["playing"] = (!isPaused && currentMediaType != MEDIA_NONE && currentFilename != "");
+    pb["paused"] = isPaused;
+    pb["filename"] = currentFilename;
+    pb["loop"] = loopEnabled;
+    
+    JsonObject l = doc.createNestedObject("led");
+    l["mode"] = ledMode;
+    l["brightness"] = ledBrightness;
+    l["color"] = ledColorHex;
+    
+    JsonObject v = doc.createNestedObject("volume");
+    v["speaker"] = speakerVolumePct;
+    v["exciter"] = exciterVolumePct;
+    
+    doc["uptime"] = millis() / 1000;
+    doc["freeHeap"] = ESP.getFreeHeap();
+    
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+}
+
+void handleApiPowerToggle() {
+    systemPowerOn = !systemPowerOn;
+    if (!systemPowerOn) _stopAudioSafely();
+    server.send(200, "application/json", String("{\"state\":\"") + (systemPowerOn ? "on" : "off") + "\"}");
+}
+
+void handleApiBattery() {
+    // Mocked for MVP
+    server.send(200, "application/json", "{\"percent\":100,\"voltage\":4.2,\"charging\":false,\"full\":true}");
+}
+
+void handleApiMediaDelete() {
+    if (!server.hasArg("filename")) {
+        server.send(400, "application/json", "{\"error\":\"Missing filename query parameter\"}");
+        return;
+    }
+    String fname = server.arg("filename");
+    if (!fname.startsWith("/")) fname = "/" + fname;
+    
+    if (fname == currentFilename && !isPaused && currentMediaType != MEDIA_NONE) {
+        server.send(409, "application/json", "{\"error\":\"File is currently playing\"}");
+        return;
+    }
+    
+    if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+        if (SD.remove(fname)) {
+            server.send(200, "application/json", "{\"status\":\"File deleted\"}");
+        } else {
+            server.send(404, "application/json", "{\"error\":\"File not found or locked\"}");
+        }
+        xSemaphoreGive(sdMutex);
+    }
+}
+
+File uploadFile;
+
+void handleApiMediaUpload() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+        String filename = upload.filename;
+        if (!filename.startsWith("/")) filename = "/" + filename;
+        if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+            uploadFile = SD.open(filename, FILE_WRITE);
+            xSemaphoreGive(sdMutex);
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (uploadFile) {
+            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+                uploadFile.write(upload.buf, upload.currentSize);
+                xSemaphoreGive(sdMutex);
+            }
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (uploadFile) {
+            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+                uploadFile.close();
+                xSemaphoreGive(sdMutex);
+            }
+        }
+    }
 }
