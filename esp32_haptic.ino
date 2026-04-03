@@ -59,6 +59,24 @@ volatile bool isUploading = false;
 enum MediaType { MEDIA_NONE, MEDIA_AUDIO, MEDIA_VIDEO };
 MediaType currentMediaType = MEDIA_NONE;
 
+enum AudioCommand {
+    CMD_IDLE,
+    CMD_PLAY,
+    CMD_STOP,
+    CMD_SEEK
+};
+struct AudioCommandMessage {
+    AudioCommand cmd;
+    char filename[192];
+    bool loopRequested;
+    uint32_t positionSec;
+};
+
+QueueHandle_t audioCmdQueue = NULL;
+volatile bool audioAbortRequested = false;
+
+extern SemaphoreHandle_t sdMutex;
+
 // -------------------- Custom Audio Output --------------------
 // This cleanly splits a single I2S DIN wire into two independent volume-controlled channels
 class AudioOutputHaptic : public AudioOutput {
@@ -101,6 +119,8 @@ public:
         // 1. Allocate an I2S TX channel (IDF v5)
         i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
         chan_cfg.auto_clear = true; // Auto clear TX buffer
+        chan_cfg.dma_desc_num = 12;    // Deep buffer for dropout prevention
+        chan_cfg.dma_frame_num = 1000; // ~270ms of audio buffer
         esp_err_t err = i2s_new_channel(&chan_cfg, &tx_chan, NULL);
         if (err != ESP_OK) {
             Serial.println("I2S channel allocation failed");
@@ -143,6 +163,7 @@ public:
 
     virtual bool ConsumeSample(int16_t sample[2]) override {
         if (!tx_chan) return false;
+        if (audioAbortRequested) return false;
         
         int16_t scaled[2];
         // Average L&R to ensure mono source, then scale independently
@@ -153,15 +174,34 @@ public:
         scaled[1] = max(-32768, min(32767, (int)(mono * rightVol)));
         
         size_t bytes_written = 0;
-        // Non-blocking-ish write keeps control path responsive during rapid API commands
-        esp_err_t err = i2s_channel_write(tx_chan, &scaled, 4, &bytes_written, 0);
+        esp_err_t err = i2s_channel_write(tx_chan, &scaled, 4, &bytes_written, pdMS_TO_TICKS(20));
         return err == ESP_OK;
     }
     
     virtual uint16_t ConsumeSamples(int16_t *samples, uint16_t count) override {
-        // We override this to process blocks via our math pipeline
-        for (uint16_t i=0; i<count; i++) {
-            ConsumeSample(samples + i*2);
+        if (!tx_chan) return 0;
+        if (audioAbortRequested) return 0;
+        
+        const uint16_t CHUNK = 128;
+        int16_t scaled[CHUNK * 2];
+        uint16_t processed = 0;
+        
+        while (processed < count) {
+            if (audioAbortRequested) return processed;
+            uint16_t toProcess = min((int)(count - processed), (int)CHUNK);
+            for (uint16_t i = 0; i < toProcess; i++) {
+                int16_t l = samples[(processed + i) * 2];
+                int16_t r = samples[(processed + i) * 2 + 1];
+                int32_t mono = (l + r) / 2;
+                scaled[i * 2]     = max(-32768, min(32767, (int)(mono * leftVol)));
+                scaled[i * 2 + 1] = max(-32768, min(32767, (int)(mono * rightVol)));
+            }
+            size_t bytes_written = 0;
+            esp_err_t err = i2s_channel_write(tx_chan, scaled, toProcess * 4, &bytes_written, pdMS_TO_TICKS(20));
+            if (err != ESP_OK) {
+                return processed;
+            }
+            processed += toProcess;
         }
         return count;
     }
@@ -176,7 +216,7 @@ public:
     }
 };
 
-AudioFileSourceSD *fileSource = NULL;
+AudioFileSource *fileSource = NULL;
 AudioFileSourceID3 *id3Source = NULL;
 AudioGeneratorMP3 *mp3 = NULL;
 AudioOutputHaptic *out = NULL;
@@ -198,9 +238,13 @@ void handleApiPowerToggle();
 void handleApiBattery();
 void handleApiMediaDelete();
 void handleApiMediaUpload();
+void handleCorsOptions();
 void updateAudioVolumeAndBalance();
 bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0);
 bool _seekAudioToSeconds(uint32_t positionSec);
+bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs = 50);
+extern size_t uploadBytesWritten;
+extern bool uploadHadWriteError;
 
 SemaphoreHandle_t sdMutex = NULL;
 
@@ -244,11 +288,7 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
 
     bool success = false;
     do {
-        Serial.printf("Checking if file exists: %s\n", filename.c_str());
-        if (!SD.exists(filename)) {
-            Serial.println("Play requested but file not found: " + filename);
-            break;
-        }
+        Serial.printf("Opening media file: %s\n", filename.c_str());
 
         String fnameLower = filename;
         fnameLower.toLowerCase();
@@ -279,6 +319,7 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             break;
         }
 
+        Serial.println("Starting decoder begin()...");
         if (!mp3->begin(id3Source, out)) {
             Serial.println("Failed to start MP3 decoder");
             break;
@@ -320,6 +361,11 @@ bool _seekAudioToSeconds(uint32_t positionSec) {
     return _startAudioPlayback(currentFilename, loopEnabled, (uint32_t)targetByte);
 }
 
+bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs) {
+    if (!audioCmdQueue) return false;
+    return xQueueSend(audioCmdQueue, &cmd, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+}
+
 // -------------------- Tasks --------------------
 void taskWebServer(void *pvParameters) {
     while (true) {
@@ -330,8 +376,28 @@ void taskWebServer(void *pvParameters) {
 
 void taskAudio(void *pvParameters) {
     while (true) {
+        if (audioAbortRequested && currentMediaType == MEDIA_AUDIO) {
+            _stopAudioSafely();
+            audioAbortRequested = false;
+        }
+
+        AudioCommandMessage cmdMsg;
+        while (xQueueReceive(audioCmdQueue, &cmdMsg, 0) == pdTRUE) {
+            if (cmdMsg.cmd == CMD_PLAY) {
+                audioAbortRequested = false;
+                _startAudioPlayback(String(cmdMsg.filename), cmdMsg.loopRequested, 0);
+            } else if (cmdMsg.cmd == CMD_STOP) {
+                audioAbortRequested = true;
+                _stopAudioSafely();
+                audioAbortRequested = false;
+            } else if (cmdMsg.cmd == CMD_SEEK) {
+                audioAbortRequested = false;
+                _seekAudioToSeconds(cmdMsg.positionSec);
+            }
+        }
+
         if (isUploading) {
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
 
@@ -340,7 +406,7 @@ void taskAudio(void *pvParameters) {
             bool playing = false;
             
             // Use a safe pointer check before calling methods on mp3
-            if (mp3 && xSemaphoreTake(sdMutex, 0)) {  
+            if (mp3 && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10))) {  
                 playing = mp3->loop();
                 xSemaphoreGive(sdMutex);
             } else {
@@ -360,7 +426,7 @@ void taskAudio(void *pvParameters) {
                 }
             }
         }
-        vTaskDelay(1); // Relax watchdogs
+        vTaskDelay(pdMS_TO_TICKS(2)); // Relax watchdogs and yield CPU to let WebServer grab the mutex if needed
     }
 }
 
@@ -431,6 +497,10 @@ void setup() {
     }
 
     sdMutex = xSemaphoreCreateMutex();
+    audioCmdQueue = xQueueCreate(8, sizeof(AudioCommandMessage));
+    if (!audioCmdQueue) {
+        Serial.println("ERROR: Failed to create audio command queue");
+    }
 
     // Initialize custom ESP-IDF Direct DMA Audio Pipeline
     out = new AudioOutputHaptic(I2S_BCLK, I2S_LRC, I2S_DOUT);
@@ -458,24 +528,47 @@ void setup() {
 
     // Setup routes
     server.on("/api/media/files", HTTP_GET, handleApiFiles);
+    server.on("/api/media/files", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/media/play", HTTP_POST, handleApiPlay);
+    server.on("/api/media/play", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/media/stop", HTTP_POST, handleApiStop);
+    server.on("/api/media/stop", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/media/pause", HTTP_POST, handleApiPause);
+    server.on("/api/media/pause", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/media/seek", HTTP_POST, handleApiSeek);
+    server.on("/api/media/seek", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/media/current", HTTP_GET, handleApiCurrent);
+    server.on("/api/media/current", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/volume/speaker", HTTP_POST, handleApiVolumeSpeaker);
+    server.on("/api/volume/speaker", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/volume/exciter", HTTP_POST, handleApiVolumeExciter);
+    server.on("/api/volume/exciter", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/media/delete", HTTP_DELETE, handleApiMediaDelete);
+    server.on("/api/media/delete", HTTP_POST, handleApiMediaDelete);
+    server.on("/api/media/delete", HTTP_OPTIONS, handleCorsOptions);
     // Note: Upload multipart route isn't easily done in server.on without huge callbacks. Using standard for now.
-    server.on("/api/media/upload", HTTP_POST, [](){ server.send(200, "application/json", "{\"status\":\"Upload done\"}"); }, handleApiMediaUpload);
+    server.on("/api/media/upload", HTTP_POST, [](){
+        if (uploadHadWriteError) {
+            server.send(500, "application/json", "{\"error\":\"Upload failed during SD write\"}");
+        } else {
+            server.send(200, "application/json", String("{\"status\":\"Upload done\",\"written\":") + uploadBytesWritten + "}");
+        }
+    }, handleApiMediaUpload);
+    server.on("/api/media/upload", HTTP_OPTIONS, handleCorsOptions);
 
     server.on("/api/led/mode", HTTP_POST, handleApiLedMode);
+    server.on("/api/led/mode", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/led/color", HTTP_POST, handleApiLedColor);
+    server.on("/api/led/color", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/led/brightness", HTTP_POST, handleApiLedBrightness);
+    server.on("/api/led/brightness", HTTP_OPTIONS, handleCorsOptions);
     
     server.on("/api/status", HTTP_GET, handleApiStatus);
+    server.on("/api/status", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/power/toggle", HTTP_POST, handleApiPowerToggle);
+    server.on("/api/power/toggle", HTTP_OPTIONS, handleCorsOptions);
     server.on("/api/battery", HTTP_GET, handleApiBattery);
+    server.on("/api/battery", HTTP_OPTIONS, handleCorsOptions);
     
     // Explicit OPTIONS handler for CORS preflight (Allows Swagger UI to work)
     server.onNotFound([]() {
@@ -511,6 +604,14 @@ void setup() {
 
 void loop() {
     vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+void handleCorsOptions() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.sendHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    server.sendHeader("Access-Control-Allow-Headers", "Content-Type, Accept");
+    server.sendHeader("Access-Control-Allow-Private-Network", "true");
+    server.send(204);
 }
 
 // -------------------- Volume Logic --------------------
@@ -588,9 +689,19 @@ void handleApiPlay() {
     }
 
     Serial.printf("AUDIO_CMD_PLAY: %s loop=%s\n", filename.c_str(), requestedLoop ? "true" : "false");
-    bool ok = _startAudioPlayback(filename, requestedLoop, 0);
-    if (!ok) {
-        server.send(404, "application/json", "{\"error\":\"Failed to start playback\"}");
+
+    audioAbortRequested = true;
+    if (audioCmdQueue) {
+        xQueueReset(audioCmdQueue);
+    }
+
+    AudioCommandMessage cmd = {};
+    cmd.cmd = CMD_PLAY;
+    cmd.loopRequested = requestedLoop;
+    strncpy(cmd.filename, filename.c_str(), sizeof(cmd.filename) - 1);
+
+    if (!_enqueueAudioCommand(cmd, 100)) {
+        server.send(503, "application/json", "{\"error\":\"Audio command queue busy\"}");
         return;
     }
 
@@ -599,7 +710,19 @@ void handleApiPlay() {
 
 void handleApiStop() {
     Serial.println("AUDIO_CMD_STOP");
-    _stopAudioSafely();
+
+    audioAbortRequested = true;
+    if (audioCmdQueue) {
+        xQueueReset(audioCmdQueue);
+    }
+
+    AudioCommandMessage cmd = {};
+    cmd.cmd = CMD_STOP;
+    if (!_enqueueAudioCommand(cmd, 100)) {
+        server.send(503, "application/json", "{\"error\":\"Audio command queue busy\"}");
+        return;
+    }
+
     server.send(200, "application/json", "{\"status\":\"Playback stopped\"}");
 }
 
@@ -630,12 +753,18 @@ void handleApiSeek() {
     }
 
     Serial.printf("AUDIO_CMD_SEEK: %d sec\n", positionSec);
-    if (!_seekAudioToSeconds((uint32_t)positionSec)) {
-        server.send(409, "application/json", "{\"error\":\"Seek failed\"}");
+
+    audioAbortRequested = true;
+
+    AudioCommandMessage cmd = {};
+    cmd.cmd = CMD_SEEK;
+    cmd.positionSec = (uint32_t)positionSec;
+    if (!_enqueueAudioCommand(cmd, 100)) {
+        server.send(503, "application/json", "{\"error\":\"Audio command queue busy\"}");
         return;
     }
 
-    server.send(200, "application/json", "{\"status\":\"Seek completed\"}");
+    server.send(200, "application/json", "{\"status\":\"Seek requested\"}");
 }
 
 void handleApiCurrent() {
@@ -813,7 +942,11 @@ void handleApiStatus() {
 
 void handleApiPowerToggle() {
     systemPowerOn = !systemPowerOn;
-    if (!systemPowerOn) _stopAudioSafely();
+    if (!systemPowerOn) {
+        AudioCommandMessage cmd = {};
+        cmd.cmd = CMD_STOP;
+        _enqueueAudioCommand(cmd, 50);
+    }
     server.send(200, "application/json", String("{\"state\":\"") + (systemPowerOn ? "on" : "off") + "\"}");
 }
 
@@ -849,46 +982,67 @@ File uploadFile;
 uint8_t *uploadBuffer = NULL;
 size_t uploadBufferIndex = 0;
 size_t actualBufferSize = 0;
-const size_t DESIRED_BUFFER_SIZE = 128 * 1024; // 128KB PSRAM buffer
+size_t uploadBytesWritten = 0;
+bool uploadHadWriteError = false;
+const size_t DESIRED_BUFFER_SIZE = 8 * 1024; // 8KB Internal RAM Buffer (Safer for SPI FATFS)
 
 void _flushUploadBuffer() {
     if (uploadFile && uploadBuffer && uploadBufferIndex > 0) {
         if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-            size_t written = uploadFile.write(uploadBuffer, uploadBufferIndex);
-            if (written != uploadBufferIndex) {
-                Serial.println("SD Write failed or partial write!");
+            size_t requested = uploadBufferIndex;
+            size_t written = uploadFile.write(uploadBuffer, requested);
+
+            if (written != requested) {
+                // One retry for transient SPI/SD timing hiccups
+                vTaskDelay(pdMS_TO_TICKS(2));
+                size_t retryWritten = uploadFile.write(uploadBuffer + written, requested - written);
+                written += retryWritten;
             }
+
+            if (written != requested) {
+                uploadHadWriteError = true;
+            }
+            uploadBytesWritten += written;
             xSemaphoreGive(sdMutex);
         }
         uploadBufferIndex = 0;
+        // Yield momentarily to let watchdog reset
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
 void handleApiMediaUpload() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+        // Hard-stop playback before upload to guarantee exclusive SD access
+        audioAbortRequested = true;
+        if (audioCmdQueue) {
+            xQueueReset(audioCmdQueue);
+        }
+        _stopAudioSafely();
         isUploading = true;
+
         // Turn off LEDs immediately to prevent FastLED interrupt starvation during WiFi/SD operation
         FastLED.clear();
         FastLED.show();
-        
-        // Stop any playing audio to ensure exclusive, fast SD card access and prevent thrashing
-        _stopAudioSafely();
         
         String filename = upload.filename;
         if (!filename.startsWith("/")) filename = "/" + filename;
         
         Serial.printf("Upload Start: %s\n", filename.c_str());
+        uploadBytesWritten = 0;
+        uploadHadWriteError = false;
         
         if (!uploadBuffer) {
-            uploadBuffer = (uint8_t*)ps_malloc(DESIRED_BUFFER_SIZE);
+            // Allocate safely in standard 8-bit internal memory (avoid PSRAM DMA issues)
+            uploadBuffer = (uint8_t*)malloc(DESIRED_BUFFER_SIZE);
             if (uploadBuffer) {
                 actualBufferSize = DESIRED_BUFFER_SIZE;
-                Serial.println("Allocated 128KB PSRAM buffer for upload.");
+                Serial.println("Allocated 8KB internal RAM buffer for SPI safe upload.");
             } else {
-                actualBufferSize = 32 * 1024;
+                actualBufferSize = 1024;
                 uploadBuffer = (uint8_t*)malloc(actualBufferSize);
-                Serial.println("Fallback to 32KB internal RAM buffer.");
+                Serial.println("Fallback to 1KB internal RAM buffer.");
             }
         }
         uploadBufferIndex = 0;
@@ -938,9 +1092,14 @@ void handleApiMediaUpload() {
         if (uploadFile) {
             _flushUploadBuffer();
             if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+                uploadFile.flush();
                 uploadFile.close();
                 xSemaphoreGive(sdMutex);
-                Serial.printf("Upload End: %s, %u bytes\n", upload.filename.c_str(), upload.totalSize);
+                if (uploadHadWriteError) {
+                    Serial.printf("Upload End With Errors: %s, expected=%u written=%u\n", upload.filename.c_str(), upload.totalSize, uploadBytesWritten);
+                } else {
+                    Serial.printf("Upload End: %s, %u bytes\n", upload.filename.c_str(), uploadBytesWritten);
+                }
             }
         }
         if (uploadBuffer) {
@@ -965,6 +1124,7 @@ void handleApiMediaUpload() {
             free(uploadBuffer);
             uploadBuffer = NULL;
         }
+        uploadHadWriteError = true;
         isUploading = false;
     }
 }

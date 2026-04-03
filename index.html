@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>ESP32 Music Control</title>
+	<style>
+		:root { color-scheme: light dark; }
+		body {
+			font-family: Arial, sans-serif;
+			margin: 0;
+			padding: 16px;
+			max-width: 900px;
+		}
+		h1 { margin-top: 0; }
+		.card {
+			border: 1px solid #6664;
+			border-radius: 10px;
+			padding: 14px;
+			margin-bottom: 12px;
+		}
+		.row {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			align-items: center;
+			margin-bottom: 8px;
+		}
+		input[type="text"], input[type="number"] {
+			padding: 6px 8px;
+			min-width: 220px;
+		}
+		button {
+			padding: 7px 10px;
+			cursor: pointer;
+		}
+		.file-item {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 8px;
+			padding: 8px 0;
+			border-top: 1px solid #6663;
+		}
+		.file-meta {
+			font-size: 13px;
+			opacity: 0.8;
+		}
+		.muted { opacity: 0.75; font-size: 13px; }
+		#status {
+			white-space: pre-wrap;
+			font-size: 13px;
+			border: 1px solid #6664;
+			border-radius: 8px;
+			padding: 10px;
+			min-height: 42px;
+		}
+		label { min-width: 80px; }
+		.grow { flex: 1; }
+	</style>
+</head>
+<body>
+	<h1>ESP32 Music Control</h1>
+
+	<div class="card">
+		<div class="row">
+			<label for="ipInput">ESP32 IP</label>
+			<input id="ipInput" type="text" placeholder="10.2.138.76" />
+			<button id="saveIpBtn">Save IP</button>
+			<button id="refreshBtn">Refresh Files</button>
+			<button id="stopBtn">Stop</button>
+		</div>
+		<div class="muted">APIs are called as <span id="apiBaseText"></span></div>
+	</div>
+
+	<div class="card">
+		<h3>LED Color</h3>
+		<div class="row">
+			<input id="colorPicker" type="color" value="#ff0000" />
+			<label for="brightnessInput">Brightness</label>
+			<input id="brightnessInput" type="number" min="0" max="255" value="20" style="width:90px" />
+			<button id="setColorBtn">Set Color</button>
+		</div>
+	</div>
+
+	<div class="card">
+		<h3>Upload Music</h3>
+		<div class="row">
+			<input id="fileInput" type="file" accept="audio/*,.mp3" class="grow" />
+			<button id="uploadBtn">Upload</button>
+		</div>
+	</div>
+
+	<div class="card">
+		<h3>Volume</h3>
+		<div class="row">
+			<label for="speakerRange">Speaker</label>
+			<input id="speakerRange" type="range" min="0" max="100" value="75" />
+			<span id="speakerVal">75</span>
+			<button id="setSpeakerBtn">Set Speaker</button>
+		</div>
+		<div class="row">
+			<label for="exciterRange">Exciter</label>
+			<input id="exciterRange" type="range" min="0" max="100" value="50" />
+			<span id="exciterVal">50</span>
+			<button id="setExciterBtn">Set Exciter</button>
+		</div>
+	</div>
+
+	<div class="card">
+		<h3>Music Files</h3>
+		<div id="filesList" class="muted">No files loaded yet.</div>
+	</div>
+
+	<div id="status">Ready.</div>
+
+	<script>
+		const ipInput = document.getElementById('ipInput');
+		const apiBaseText = document.getElementById('apiBaseText');
+		const statusEl = document.getElementById('status');
+		const filesList = document.getElementById('filesList');
+
+		const speakerRange = document.getElementById('speakerRange');
+		const exciterRange = document.getElementById('exciterRange');
+		const speakerVal = document.getElementById('speakerVal');
+		const exciterVal = document.getElementById('exciterVal');
+
+		const storedIp = localStorage.getItem('esp32_ip') || '10.2.138.76';
+		ipInput.value = storedIp;
+		updateBaseText();
+
+		function getBaseUrl() {
+			return `http://${ipInput.value.trim()}`;
+		}
+
+		function updateBaseText() {
+			apiBaseText.textContent = `${getBaseUrl()}/api/...`;
+		}
+
+		function logStatus(msg, obj) {
+			const suffix = obj ? `\n${JSON.stringify(obj, null, 2)}` : '';
+			statusEl.textContent = `${new Date().toLocaleTimeString()} - ${msg}${suffix}`;
+		}
+
+		async function api(path, options = {}) {
+			const url = `${getBaseUrl()}${path}`;
+
+			const hasBody = typeof options.body === 'string';
+			if (hasBody) {
+				options.headers = options.headers || {};
+				if (!options.headers['Content-Type']) {
+					options.headers['Content-Type'] = 'text/plain;charset=UTF-8';
+				}
+			}
+
+			const resp = await fetch(url, options);
+			let data = null;
+			try { data = await resp.json(); } catch (_) {}
+			if (!resp.ok) {
+				const msg = data?.error || `HTTP ${resp.status}`;
+				throw new Error(msg);
+			}
+			return data;
+		}
+
+		async function refreshFiles() {
+			filesList.textContent = 'Loading files...';
+			try {
+				const data = await api('/api/media/files');
+				renderFiles(data.files || []);
+				logStatus('File list updated.');
+			} catch (err) {
+				filesList.textContent = 'Failed to load files.';
+				logStatus(`Refresh failed: ${err.message}`);
+			}
+		}
+
+		function renderFiles(files) {
+			if (!files.length) {
+				filesList.textContent = 'No files on SD card.';
+				return;
+			}
+			filesList.innerHTML = '';
+			files.forEach(file => {
+				const row = document.createElement('div');
+				row.className = 'file-item';
+
+				const left = document.createElement('div');
+				left.innerHTML = `
+					<div>${file.filename}</div>
+					<div class="file-meta">${Math.round((file.size || 0) / 1024)} KB</div>
+				`;
+
+				const right = document.createElement('div');
+
+				const playBtn = document.createElement('button');
+				playBtn.textContent = 'Play';
+				playBtn.onclick = async () => {
+					try {
+						await api('/api/media/play', {
+							method: 'POST',
+							body: JSON.stringify({ filename: file.filename, loop: false, duration: 0 })
+						});
+						logStatus(`Playing ${file.filename}`);
+					} catch (err) {
+						logStatus(`Play failed: ${err.message}`);
+					}
+				};
+
+				const delBtn = document.createElement('button');
+				delBtn.textContent = 'Delete';
+				delBtn.onclick = async () => {
+					if (!confirm(`Delete ${file.filename}?`)) return;
+					try {
+						const normalized = String(file.filename || '').replace(/^\/+/, '');
+						const deleteUrl = `${getBaseUrl()}/api/media/delete?filename=${encodeURIComponent(normalized)}`;
+						const resp = await fetch(deleteUrl, {
+								method: 'POST',
+							cache: 'no-store'
+						});
+						if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+						logStatus(`Deleted ${file.filename}`);
+						await refreshFiles();
+					} catch (err) {
+						logStatus(`Delete failed: ${err.message}`);
+					}
+				};
+
+				right.appendChild(playBtn);
+				right.appendChild(delBtn);
+				row.appendChild(left);
+				row.appendChild(right);
+				filesList.appendChild(row);
+			});
+		}
+
+		document.getElementById('saveIpBtn').onclick = () => {
+			localStorage.setItem('esp32_ip', ipInput.value.trim());
+			updateBaseText();
+			logStatus('IP saved.');
+		};
+
+		document.getElementById('refreshBtn').onclick = refreshFiles;
+
+		document.getElementById('stopBtn').onclick = async () => {
+			try {
+				await api('/api/media/stop', { method: 'POST' });
+				logStatus('Playback stopped.');
+			} catch (err) {
+				logStatus(`Stop failed: ${err.message}`);
+			}
+		};
+
+		document.getElementById('setColorBtn').onclick = async () => {
+			const color = document.getElementById('colorPicker').value;
+			const brightness = Number(document.getElementById('brightnessInput').value || 0);
+			try {
+				await api('/api/led/color', {
+					method: 'POST',
+					body: JSON.stringify({ color, brightness })
+				});
+				logStatus(`Color set to ${color}, brightness ${brightness}`);
+			} catch (err) {
+				logStatus(`Set color failed: ${err.message}`);
+			}
+		};
+
+		speakerRange.oninput = () => speakerVal.textContent = speakerRange.value;
+		exciterRange.oninput = () => exciterVal.textContent = exciterRange.value;
+
+		document.getElementById('setSpeakerBtn').onclick = async () => {
+			try {
+				await api('/api/volume/speaker', {
+					method: 'POST',
+					body: JSON.stringify({ level: Number(speakerRange.value) })
+				});
+				logStatus(`Speaker volume set to ${speakerRange.value}`);
+			} catch (err) {
+				logStatus(`Speaker volume failed: ${err.message}`);
+			}
+		};
+
+		document.getElementById('setExciterBtn').onclick = async () => {
+			try {
+				await api('/api/volume/exciter', {
+					method: 'POST',
+					body: JSON.stringify({ level: Number(exciterRange.value) })
+				});
+				logStatus(`Exciter volume set to ${exciterRange.value}`);
+			} catch (err) {
+				logStatus(`Exciter volume failed: ${err.message}`);
+			}
+		};
+
+		document.getElementById('uploadBtn').onclick = async () => {
+			const file = document.getElementById('fileInput').files[0];
+			if (!file) {
+				logStatus('Choose a file first.');
+				return;
+			}
+			const form = new FormData();
+			form.append('file', file, file.name);
+
+			try {
+				logStatus(`Uploading ${file.name}...`);
+				const resp = await fetch(`${getBaseUrl()}/api/media/upload`, {
+					method: 'POST',
+					body: form
+				});
+				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+				logStatus(`Upload done: ${file.name}`);
+				await refreshFiles();
+			} catch (err) {
+				logStatus(`Upload failed: ${err.message}`);
+			}
+		};
+
+		refreshFiles();
+	</script>
+</body>
+</html>
