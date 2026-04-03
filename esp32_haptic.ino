@@ -54,6 +54,7 @@ uint8_t exciterVolumePct = 50; // Left channel (Exciter)
 bool loopEnabled = false;
 String currentFilename = "";
 bool isPaused = false;
+volatile bool isUploading = false;
 
 enum MediaType { MEDIA_NONE, MEDIA_AUDIO, MEDIA_VIDEO };
 MediaType currentMediaType = MEDIA_NONE;
@@ -329,6 +330,11 @@ void taskWebServer(void *pvParameters) {
 
 void taskAudio(void *pvParameters) {
     while (true) {
+        if (isUploading) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
         if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
             bool playing = false;
@@ -361,6 +367,11 @@ void taskAudio(void *pvParameters) {
 void taskLEDs(void *pvParameters) {
     uint8_t hue = 0;
     while (true) {
+        if (isUploading) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         if (!systemPowerOn) {
             FastLED.clear();
             FastLED.show();
@@ -835,29 +846,125 @@ void handleApiMediaDelete() {
 }
 
 File uploadFile;
+uint8_t *uploadBuffer = NULL;
+size_t uploadBufferIndex = 0;
+size_t actualBufferSize = 0;
+const size_t DESIRED_BUFFER_SIZE = 128 * 1024; // 128KB PSRAM buffer
+
+void _flushUploadBuffer() {
+    if (uploadFile && uploadBuffer && uploadBufferIndex > 0) {
+        if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+            size_t written = uploadFile.write(uploadBuffer, uploadBufferIndex);
+            if (written != uploadBufferIndex) {
+                Serial.println("SD Write failed or partial write!");
+            }
+            xSemaphoreGive(sdMutex);
+        }
+        uploadBufferIndex = 0;
+    }
+}
 
 void handleApiMediaUpload() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+        isUploading = true;
+        // Turn off LEDs immediately to prevent FastLED interrupt starvation during WiFi/SD operation
+        FastLED.clear();
+        FastLED.show();
+        
+        // Stop any playing audio to ensure exclusive, fast SD card access and prevent thrashing
+        _stopAudioSafely();
+        
         String filename = upload.filename;
         if (!filename.startsWith("/")) filename = "/" + filename;
+        
+        Serial.printf("Upload Start: %s\n", filename.c_str());
+        
+        if (!uploadBuffer) {
+            uploadBuffer = (uint8_t*)ps_malloc(DESIRED_BUFFER_SIZE);
+            if (uploadBuffer) {
+                actualBufferSize = DESIRED_BUFFER_SIZE;
+                Serial.println("Allocated 128KB PSRAM buffer for upload.");
+            } else {
+                actualBufferSize = 32 * 1024;
+                uploadBuffer = (uint8_t*)malloc(actualBufferSize);
+                Serial.println("Fallback to 32KB internal RAM buffer.");
+            }
+        }
+        uploadBufferIndex = 0;
+        
         if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+            // Remove existing file if it exists to overwrite cleanly
+            if (SD.exists(filename)) {
+                SD.remove(filename);
+            }
             uploadFile = SD.open(filename, FILE_WRITE);
+            if (!uploadFile) {
+                Serial.println("Failed to open SD file for writing!");
+            }
             xSemaphoreGive(sdMutex);
         }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
         if (uploadFile) {
-            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-                uploadFile.write(upload.buf, upload.currentSize);
-                xSemaphoreGive(sdMutex);
+            if (uploadBuffer) {
+                size_t remaining = upload.currentSize;
+                uint8_t* ptr = upload.buf;
+                
+                while (remaining > 0) {
+                    size_t spaceLeft = actualBufferSize - uploadBufferIndex;
+                    size_t toCopy = (remaining < spaceLeft) ? remaining : spaceLeft;
+                    
+                    memcpy(&uploadBuffer[uploadBufferIndex], ptr, toCopy);
+                    uploadBufferIndex += toCopy;
+                    ptr += toCopy;
+                    remaining -= toCopy;
+                    
+                    if (uploadBufferIndex >= actualBufferSize) {
+                        _flushUploadBuffer();
+                    }
+                }
+            } else {
+                // Complete fallback if even malloc failed
+                if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+                    size_t written = uploadFile.write(upload.buf, upload.currentSize);
+                    if (written != upload.currentSize) {
+                        Serial.println("SD Write failed or partial write!");
+                    }
+                    xSemaphoreGive(sdMutex);
+                }
             }
         }
     } else if (upload.status == UPLOAD_FILE_END) {
         if (uploadFile) {
+            _flushUploadBuffer();
             if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
                 uploadFile.close();
                 xSemaphoreGive(sdMutex);
+                Serial.printf("Upload End: %s, %u bytes\n", upload.filename.c_str(), upload.totalSize);
             }
         }
+        if (uploadBuffer) {
+            free(uploadBuffer);
+            uploadBuffer = NULL;
+        }
+        isUploading = false;
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        if (uploadFile) {
+            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
+                uploadFile.close();
+                xSemaphoreGive(sdMutex);
+                Serial.println("Upload Aborted by client!");
+                
+                // Delete the incomplete file
+                String filename = upload.filename;
+                if (!filename.startsWith("/")) filename = "/" + filename;
+                SD.remove(filename);
+            }
+        }
+        if (uploadBuffer) {
+            free(uploadBuffer);
+            uploadBuffer = NULL;
+        }
+        isUploading = false;
     }
 }
