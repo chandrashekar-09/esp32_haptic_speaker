@@ -6,6 +6,7 @@
 #include <SD.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <jpeg_decoder.h>
 
 // ESP-IDF Low-Level I2S
 #include <driver/i2s_std.h>
@@ -15,6 +16,7 @@
 #include "AudioFileSourceSD.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
+#include "AudioLogger.h"
 #include "AudioOutput.h" // We MUST use Base and rewrite the driver completely for IDF v5
 
 // -------------------- Pins --------------------
@@ -27,8 +29,21 @@
 #define I2S_LRC  6
 #define I2S_DOUT 7
 
+// -------------------- ST7789 Display Pins (separate SPI host) --------------------
+#define TFT_SCLK 18
+#define TFT_MOSI 17
+#define TFT_CS   16
+#define TFT_DC   15
+#define TFT_RST  4
+#define TFT_BL   21
+#define TFT_WIDTH 240
+#define TFT_HEIGHT 280
+#define TFT_X_OFFSET 0
+#define TFT_Y_OFFSET 20
+#define TFT_SPI_HZ 60000000
+
 // -------------------- LED Pins ----------------
-#define LED_PIN  38
+#define LED_PIN  40
 #define NUM_LEDS 24
 
 // -------------------- WiFi --------------------
@@ -40,6 +55,8 @@ WebServer server(80);
 Preferences prefs;
 
 TaskHandle_t audioTaskHandle = NULL;
+TaskHandle_t videoDecodeTaskHandle = NULL;
+TaskHandle_t displayFlushTaskHandle = NULL;
 
 // -------------------- LED Globals -------------
 CRGB leds[NUM_LEDS];
@@ -74,6 +91,60 @@ struct AudioCommandMessage {
 
 QueueHandle_t audioCmdQueue = NULL;
 volatile bool audioAbortRequested = false;
+
+struct VideoPacket {
+    uint32_t ptsMs;
+    uint32_t dataLen;
+    bool keyFrame;
+    uint16_t color565;
+    uint8_t frameIndex;
+};
+
+QueueHandle_t videoPacketQueue = NULL;
+QueueHandle_t videoDisplayQueue = NULL;
+volatile bool videoPipelineActive = false;
+volatile bool displayReady = false;
+volatile uint32_t videoTargetFps = 15;
+volatile uint32_t videoFramesDecoded = 0;
+volatile uint32_t videoFramesDisplayed = 0;
+volatile uint32_t videoFramesDropped = 0;
+volatile int32_t videoAvDriftMs = 0;
+volatile uint32_t videoStartMs = 0;
+volatile bool videoUseFileStream = false;
+volatile bool videoUseRawFrameStream = false;
+volatile bool videoUseMjpegStream = false;
+volatile bool videoStreamEof = false;
+uint32_t videoStreamHeaderSize = 0;
+
+File videoStreamFile;
+File videoRawFile;
+File videoMjpegFile;
+uint32_t videoRawHeaderSize = 0;
+uint16_t videoRawWidth = TFT_WIDTH;
+uint16_t videoRawHeight = TFT_HEIGHT;
+uint16_t videoRawFps = 15;
+size_t videoRawFrameSize = 0;
+uint8_t *videoFrameBuffers[2] = {NULL, NULL};
+uint8_t *videoMjpegFrameData = NULL;
+size_t videoMjpegFrameCapacity = 0;
+uint8_t *videoMjpegDecodeBuffer = NULL;
+size_t videoMjpegDecodeBufferSize = 0;
+volatile bool videoMjpegLastReadEof = false;
+
+#define MJPEG_MAX_FRAME_BYTES (300U * 1024U)
+#define MJPEG_DECODE_MAX_PIXELS (320U * 320U)
+#define MJPEG_SWAP_RGB565_BYTES 1
+#define MJPEG_FLIP_X 0
+#define MJPEG_FLIP_Y 0
+#define MJPEG_ROTATE_90_CW 1
+#define MJPEG_FILL_SCREEN_CROP 1
+
+volatile bool videoCompanionAudioActive = false;
+bool videoCompanionAudioLoop = false;
+String videoCompanionAudioFile = "";
+
+SPIClass *tftSpi = NULL;
+SemaphoreHandle_t tftMutex = NULL;
 
 extern SemaphoreHandle_t sdMutex;
 
@@ -239,8 +310,28 @@ void handleApiBattery();
 void handleApiMediaDelete();
 void handleApiMediaUpload();
 void handleCorsOptions();
+void taskVideoDecode(void *pvParameters);
+void taskDisplayFlush(void *pvParameters);
+void initDisplayVideoScaffold();
+bool initSt7789Panel();
+void st7789WriteCommand(uint8_t command, const uint8_t *data, size_t dataLen);
+void st7789SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void st7789FillColor(uint16_t color);
+void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height);
+bool _startVideoPlayback(const String& filename, bool loopRequested);
+bool _openVideoColorStream(const String& filename);
+bool _readNextVideoPacket(VideoPacket &packet);
+void _closeVideoColorStream();
+bool _openRawFrameStream(const String& filename);
+bool _readRawFrameToBuffer(uint8_t frameIndex);
+void _closeRawFrameStream();
+bool _openMjpegStream(const String& filename);
+bool _readMjpegFrameToBuffer(uint8_t frameIndex);
+void _closeMjpegStream();
+void _stopAudioDecoderOnly();
+void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequested);
 void updateAudioVolumeAndBalance();
-bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0);
+bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0, bool updateMediaState = true);
 bool _seekAudioToSeconds(uint32_t positionSec);
 bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs = 50);
 extern size_t uploadBytesWritten;
@@ -272,17 +363,57 @@ void _stopAudioSafely() {
         fileSource = NULL;
     }
 
+    _closeVideoColorStream();
+    _closeRawFrameStream();
+    _closeMjpegStream();
+    videoUseFileStream = false;
+    videoUseRawFrameStream = false;
+    videoUseMjpegStream = false;
+    videoStreamEof = false;
+
     if (sdMutex) {
         xSemaphoreGive(sdMutex);
     }
 
     currentFilename = "";
     loopEnabled = false;
+    videoCompanionAudioActive = false;
+    videoCompanionAudioLoop = false;
+    videoCompanionAudioFile = "";
     isPaused = false;
 }
 
-bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte) {
-    _stopAudioSafely();
+void _stopAudioDecoderOnly() {
+    if (sdMutex) {
+        xSemaphoreTake(sdMutex, portMAX_DELAY);
+    }
+
+    if (mp3) {
+        if (mp3->isRunning()) mp3->stop();
+        delete mp3;
+        mp3 = NULL;
+    }
+    if (id3Source) {
+        delete id3Source;
+        id3Source = NULL;
+    }
+    if (fileSource) {
+        if (fileSource->isOpen()) fileSource->close();
+        delete fileSource;
+        fileSource = NULL;
+    }
+
+    if (sdMutex) {
+        xSemaphoreGive(sdMutex);
+    }
+}
+
+bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte, bool updateMediaState) {
+    if (updateMediaState) {
+        _stopAudioSafely();
+    } else {
+        _stopAudioDecoderOnly();
+    }
 
     xSemaphoreTake(sdMutex, portMAX_DELAY);
 
@@ -325,9 +456,15 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             break;
         }
 
-        currentMediaType = MEDIA_AUDIO;
-        currentFilename = filename;
-        loopEnabled = loopRequested;
+        if (updateMediaState) {
+            currentMediaType = MEDIA_AUDIO;
+            currentFilename = filename;
+            loopEnabled = loopRequested;
+        } else {
+            videoCompanionAudioActive = true;
+            videoCompanionAudioLoop = loopRequested;
+            videoCompanionAudioFile = filename;
+        }
         isPaused = false;
         Serial.println("Starting MP3 Audio Decoder...");
         success = true;
@@ -341,9 +478,15 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             delete fileSource;
             fileSource = NULL;
         }
-        currentMediaType = MEDIA_NONE;
-        currentFilename = "";
-        loopEnabled = false;
+        if (updateMediaState) {
+            currentMediaType = MEDIA_NONE;
+            currentFilename = "";
+            loopEnabled = false;
+        } else {
+            videoCompanionAudioActive = false;
+            videoCompanionAudioLoop = false;
+            videoCompanionAudioFile = "";
+        }
         isPaused = false;
     }
 
@@ -376,7 +519,7 @@ void taskWebServer(void *pvParameters) {
 
 void taskAudio(void *pvParameters) {
     while (true) {
-        if (audioAbortRequested && currentMediaType == MEDIA_AUDIO) {
+        if (audioAbortRequested && mp3) {
             _stopAudioSafely();
             audioAbortRequested = false;
         }
@@ -402,7 +545,7 @@ void taskAudio(void *pvParameters) {
         }
 
         // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
-        if (!isPaused && currentMediaType == MEDIA_AUDIO && mp3 && mp3->isRunning()) {
+        if (!isPaused && mp3 && mp3->isRunning()) {
             bool playing = false;
             
             // Use a safe pointer check before calling methods on mp3
@@ -414,15 +557,29 @@ void taskAudio(void *pvParameters) {
             }
             
             if (!playing) {
-                String finishedTrack = currentFilename;
-                bool shouldLoop = loopEnabled;
-                _stopAudioSafely();
+                if (currentMediaType == MEDIA_AUDIO) {
+                    String finishedTrack = currentFilename;
+                    bool shouldLoop = loopEnabled;
+                    _stopAudioSafely();
 
-                if (shouldLoop && finishedTrack.length() > 0) {
-                    Serial.println("Restarting loop...");
-                    _startAudioPlayback(finishedTrack, true, 0);
-                } else {
-                    Serial.println("Playback finished naturally");
+                    if (shouldLoop && finishedTrack.length() > 0) {
+                        Serial.println("Restarting loop...");
+                        _startAudioPlayback(finishedTrack, true, 0, true);
+                    } else {
+                        Serial.println("Playback finished naturally");
+                    }
+                } else if (videoCompanionAudioActive) {
+                    String finishedTrack = videoCompanionAudioFile;
+                    bool shouldLoop = videoCompanionAudioLoop;
+                    _stopAudioDecoderOnly();
+
+                    if (shouldLoop && finishedTrack.length() > 0) {
+                        _startAudioPlayback(finishedTrack, true, 0, false);
+                    } else {
+                        videoCompanionAudioActive = false;
+                        videoCompanionAudioLoop = false;
+                        videoCompanionAudioFile = "";
+                    }
                 }
             }
         }
@@ -468,11 +625,917 @@ void taskLEDs(void *pvParameters) {
     }
 }
 
+void initDisplayVideoScaffold() {
+    pinMode(TFT_CS, OUTPUT);
+    pinMode(TFT_DC, OUTPUT);
+    pinMode(TFT_RST, OUTPUT);
+    pinMode(TFT_BL, OUTPUT);
+
+    digitalWrite(TFT_CS, HIGH);
+    digitalWrite(TFT_DC, HIGH);
+    digitalWrite(TFT_RST, HIGH);
+    digitalWrite(TFT_BL, HIGH);
+
+    tftMutex = xSemaphoreCreateMutex();
+    tftSpi = new SPIClass(HSPI);
+    if (tftSpi) {
+        tftSpi->begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
+        displayReady = initSt7789Panel();
+    }
+
+    videoRawFrameSize = (size_t)TFT_WIDTH * (size_t)TFT_HEIGHT * 2U;
+    videoFrameBuffers[0] = (uint8_t*)ps_malloc(videoRawFrameSize);
+    videoFrameBuffers[1] = (uint8_t*)ps_malloc(videoRawFrameSize);
+    if (!videoFrameBuffers[0] || !videoFrameBuffers[1]) {
+        if (videoFrameBuffers[0]) free(videoFrameBuffers[0]);
+        if (videoFrameBuffers[1]) free(videoFrameBuffers[1]);
+        videoFrameBuffers[0] = NULL;
+        videoFrameBuffers[1] = NULL;
+        Serial.println("WARN: Raw frame buffers unavailable; .v16 playback disabled.");
+    }
+
+    videoMjpegFrameCapacity = MJPEG_MAX_FRAME_BYTES;
+    videoMjpegFrameData = (uint8_t*)ps_malloc(videoMjpegFrameCapacity);
+    videoMjpegDecodeBufferSize = max(videoRawFrameSize, (size_t)MJPEG_DECODE_MAX_PIXELS * 2U);
+    videoMjpegDecodeBuffer = (uint8_t*)ps_malloc(videoMjpegDecodeBufferSize);
+    if (!videoMjpegFrameData || !videoMjpegDecodeBuffer) {
+        if (videoMjpegFrameData) free(videoMjpegFrameData);
+        if (videoMjpegDecodeBuffer) free(videoMjpegDecodeBuffer);
+        videoMjpegFrameData = NULL;
+        videoMjpegDecodeBuffer = NULL;
+        videoMjpegFrameCapacity = 0;
+        videoMjpegDecodeBufferSize = 0;
+        Serial.println("WARN: MJPEG buffers unavailable; .mjpg/.mjpeg playback disabled.");
+    }
+
+    videoPacketQueue = xQueueCreate(24, sizeof(VideoPacket));
+    videoDisplayQueue = xQueueCreate(6, sizeof(VideoPacket));
+
+    if (!videoPacketQueue || !videoDisplayQueue) {
+        Serial.println("WARN: Video queues allocation failed; video pipeline disabled.");
+        videoPipelineActive = false;
+        return;
+    }
+
+    videoPipelineActive = true;
+    if (displayReady) {
+        st7789FillColor(0xF800);
+        delay(120);
+        st7789FillColor(0x07E0);
+        delay(120);
+        st7789FillColor(0x001F);
+        delay(120);
+        st7789FillColor(0x0000);
+        Serial.println("ST7789 panel init OK (RGB test shown)");
+    } else {
+        Serial.println("WARN: ST7789 panel init failed");
+    }
+    Serial.println("Video scaffold initialized (decode/display active).");
+}
+
+void st7789WriteCommand(uint8_t command, const uint8_t *data, size_t dataLen) {
+    if (!tftSpi) return;
+    if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
+
+    tftSpi->beginTransaction(SPISettings(TFT_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(TFT_CS, LOW);
+    digitalWrite(TFT_DC, LOW);
+    tftSpi->transfer(command);
+    if (data && dataLen > 0) {
+        digitalWrite(TFT_DC, HIGH);
+        tftSpi->writeBytes(data, (uint32_t)dataLen);
+    }
+    digitalWrite(TFT_CS, HIGH);
+    tftSpi->endTransaction();
+
+    if (tftMutex) xSemaphoreGive(tftMutex);
+}
+
+void st7789SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
+    x0 += TFT_X_OFFSET;
+    x1 += TFT_X_OFFSET;
+    y0 += TFT_Y_OFFSET;
+    y1 += TFT_Y_OFFSET;
+
+    uint8_t colData[4] = {
+        (uint8_t)(x0 >> 8), (uint8_t)(x0 & 0xFF),
+        (uint8_t)(x1 >> 8), (uint8_t)(x1 & 0xFF)
+    };
+    uint8_t rowData[4] = {
+        (uint8_t)(y0 >> 8), (uint8_t)(y0 & 0xFF),
+        (uint8_t)(y1 >> 8), (uint8_t)(y1 & 0xFF)
+    };
+
+    st7789WriteCommand(0x2A, colData, sizeof(colData));
+    st7789WriteCommand(0x2B, rowData, sizeof(rowData));
+    st7789WriteCommand(0x2C, NULL, 0);
+}
+
+void st7789FillColor(uint16_t color) {
+    if (!tftSpi || !displayReady) return;
+    if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(30)) != pdTRUE) return;
+
+    uint8_t lineBuffer[TFT_WIDTH * 2];
+    for (int x = 0; x < TFT_WIDTH; x++) {
+        lineBuffer[(x * 2)] = (uint8_t)(color >> 8);
+        lineBuffer[(x * 2) + 1] = (uint8_t)(color & 0xFF);
+    }
+
+    tftSpi->beginTransaction(SPISettings(TFT_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(TFT_CS, LOW);
+
+    uint16_t x0 = TFT_X_OFFSET;
+    uint16_t x1 = TFT_X_OFFSET + TFT_WIDTH - 1;
+    uint16_t y0 = TFT_Y_OFFSET;
+    uint16_t y1 = TFT_Y_OFFSET + TFT_HEIGHT - 1;
+
+    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2A);
+    digitalWrite(TFT_DC, HIGH);
+    tftSpi->transfer((uint8_t)(x0 >> 8));
+    tftSpi->transfer((uint8_t)(x0 & 0xFF));
+    tftSpi->transfer((uint8_t)(x1 >> 8));
+    tftSpi->transfer((uint8_t)(x1 & 0xFF));
+
+    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2B);
+    digitalWrite(TFT_DC, HIGH);
+    tftSpi->transfer((uint8_t)(y0 >> 8));
+    tftSpi->transfer((uint8_t)(y0 & 0xFF));
+    tftSpi->transfer((uint8_t)(y1 >> 8));
+    tftSpi->transfer((uint8_t)(y1 & 0xFF));
+
+    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2C);
+    digitalWrite(TFT_DC, HIGH);
+
+    for (int y = 0; y < TFT_HEIGHT; y++) {
+        tftSpi->writeBytes(lineBuffer, (uint32_t)sizeof(lineBuffer));
+    }
+
+    digitalWrite(TFT_CS, HIGH);
+    tftSpi->endTransaction();
+
+    if (tftMutex) xSemaphoreGive(tftMutex);
+}
+
+void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height) {
+    if (!tftSpi || !displayReady || !frameData) return;
+    if (width != TFT_WIDTH || height != TFT_HEIGHT) return;
+    if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(40)) != pdTRUE) return;
+
+    tftSpi->beginTransaction(SPISettings(TFT_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(TFT_CS, LOW);
+
+    uint16_t x0 = TFT_X_OFFSET;
+    uint16_t x1 = TFT_X_OFFSET + width - 1;
+    uint16_t y0 = TFT_Y_OFFSET;
+    uint16_t y1 = TFT_Y_OFFSET + height - 1;
+
+    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2A);
+    digitalWrite(TFT_DC, HIGH);
+    tftSpi->transfer((uint8_t)(x0 >> 8));
+    tftSpi->transfer((uint8_t)(x0 & 0xFF));
+    tftSpi->transfer((uint8_t)(x1 >> 8));
+    tftSpi->transfer((uint8_t)(x1 & 0xFF));
+
+    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2B);
+    digitalWrite(TFT_DC, HIGH);
+    tftSpi->transfer((uint8_t)(y0 >> 8));
+    tftSpi->transfer((uint8_t)(y0 & 0xFF));
+    tftSpi->transfer((uint8_t)(y1 >> 8));
+    tftSpi->transfer((uint8_t)(y1 & 0xFF));
+
+    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2C);
+    digitalWrite(TFT_DC, HIGH);
+
+    size_t totalBytes = (size_t)width * (size_t)height * 2U;
+    const uint8_t *ptr = frameData;
+    while (totalBytes > 0) {
+        uint32_t chunk = (totalBytes > 4096U) ? 4096U : (uint32_t)totalBytes;
+        tftSpi->writeBytes(ptr, chunk);
+        ptr += chunk;
+        totalBytes -= chunk;
+    }
+
+    digitalWrite(TFT_CS, HIGH);
+    tftSpi->endTransaction();
+
+    if (tftMutex) xSemaphoreGive(tftMutex);
+}
+
+bool initSt7789Panel() {
+    if (!tftSpi) return false;
+
+    digitalWrite(TFT_RST, LOW);
+    delay(20);
+    digitalWrite(TFT_RST, HIGH);
+    delay(120);
+
+    st7789WriteCommand(0x01, NULL, 0); // SWRESET
+    delay(120);
+    st7789WriteCommand(0x11, NULL, 0); // SLPOUT
+    delay(120);
+
+    uint8_t colmod = 0x55; // RGB565
+    st7789WriteCommand(0x3A, &colmod, 1);
+
+    uint8_t madctl = 0x00;
+    st7789WriteCommand(0x36, &madctl, 1);
+
+    uint8_t porch[5] = {0x0C, 0x0C, 0x00, 0x33, 0x33};
+    st7789WriteCommand(0xB2, porch, sizeof(porch));
+
+    uint8_t gate = 0x35;
+    st7789WriteCommand(0xB7, &gate, 1);
+
+    uint8_t vcom = 0x19;
+    st7789WriteCommand(0xBB, &vcom, 1);
+
+    uint8_t lcm = 0x2C;
+    st7789WriteCommand(0xC0, &lcm, 1);
+
+    uint8_t vdvVrh[2] = {0x01, 0xFF};
+    st7789WriteCommand(0xC2, vdvVrh, sizeof(vdvVrh));
+
+    uint8_t vrhs = 0x12;
+    st7789WriteCommand(0xC3, &vrhs, 1);
+
+    uint8_t vdvs = 0x20;
+    st7789WriteCommand(0xC4, &vdvs, 1);
+
+    uint8_t frctrl2 = 0x0F;
+    st7789WriteCommand(0xC6, &frctrl2, 1);
+
+    uint8_t pwctrl1 = 0xA4;
+    st7789WriteCommand(0xD0, &pwctrl1, 1);
+
+    st7789WriteCommand(0x21, NULL, 0); // INVON
+    st7789WriteCommand(0x13, NULL, 0); // NORON
+    st7789WriteCommand(0x29, NULL, 0); // DISPON
+    delay(20);
+
+    digitalWrite(TFT_BL, HIGH);
+    return true;
+}
+
+bool _startVideoPlayback(const String& filename, bool loopRequested) {
+    _stopAudioSafely();
+
+    currentMediaType = MEDIA_VIDEO;
+    currentFilename = filename;
+    loopEnabled = loopRequested;
+    isPaused = false;
+
+    videoFramesDecoded = 0;
+    videoFramesDisplayed = 0;
+    videoFramesDropped = 0;
+    videoAvDriftMs = 0;
+    videoStartMs = millis();
+    videoUseFileStream = false;
+    videoUseRawFrameStream = false;
+    videoUseMjpegStream = false;
+    videoStreamEof = false;
+
+    String lower = filename;
+    lower.toLowerCase();
+    if (lower.endsWith(".v16")) {
+        videoUseRawFrameStream = _openRawFrameStream(filename);
+        if (!videoUseRawFrameStream) {
+            Serial.println("Video .v16 stream open failed, using synthetic fallback.");
+        }
+    } else if (lower.endsWith(".mjpg") || lower.endsWith(".mjpeg")) {
+        videoUseMjpegStream = _openMjpegStream(filename);
+        if (!videoUseMjpegStream) {
+            Serial.println("Video MJPEG stream open failed, using synthetic fallback.");
+        }
+    } else if (lower.endsWith(".vid")) {
+        videoUseFileStream = _openVideoColorStream(filename);
+        if (!videoUseFileStream) {
+            Serial.println("Video .vid stream open failed, using synthetic fallback.");
+        }
+    }
+
+    if (videoPacketQueue) xQueueReset(videoPacketQueue);
+    if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
+
+    _tryStartVideoCompanionAudio(filename, loopRequested);
+
+    const char* modeStr = "synthetic";
+    if (videoUseRawFrameStream) modeStr = "raw-frame";
+    else if (videoUseMjpegStream) modeStr = "mjpeg";
+    else if (videoUseFileStream) modeStr = "color-stream";
+    Serial.printf("Video playback started (%s).\n", modeStr);
+    return true;
+}
+
+bool _openVideoColorStream(const String& filename) {
+    if (!sdMutex) return false;
+
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300))) {
+        return false;
+    }
+
+    bool ok = false;
+    do {
+        if (videoStreamFile) {
+            videoStreamFile.close();
+        }
+
+        videoStreamFile = SD.open(filename, FILE_READ);
+        if (!videoStreamFile) {
+            break;
+        }
+
+        uint8_t magic[4] = {0};
+        if (videoStreamFile.read(magic, sizeof(magic)) != (int)sizeof(magic)) {
+            videoStreamFile.close();
+            break;
+        }
+
+        if (!(magic[0] == 'V' && magic[1] == 'C' && magic[2] == 'L' && magic[3] == 'R')) {
+            videoStreamFile.close();
+            break;
+        }
+
+        videoStreamHeaderSize = 4;
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    return ok;
+}
+
+bool _readNextVideoPacket(VideoPacket &packet) {
+    if (!sdMutex || !videoStreamFile) return false;
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100))) {
+        return false;
+    }
+
+    uint8_t buffer[6] = {0};
+    int readLen = videoStreamFile.read(buffer, sizeof(buffer));
+    xSemaphoreGive(sdMutex);
+
+    if (readLen != (int)sizeof(buffer)) {
+        return false;
+    }
+
+    packet.ptsMs = (uint32_t)buffer[0] |
+                   ((uint32_t)buffer[1] << 8) |
+                   ((uint32_t)buffer[2] << 16) |
+                   ((uint32_t)buffer[3] << 24);
+    packet.color565 = (uint16_t)buffer[4] | ((uint16_t)buffer[5] << 8);
+    packet.dataLen = videoFramesDecoded;
+    packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
+    return true;
+}
+
+void _closeVideoColorStream() {
+    if (videoStreamFile) {
+        videoStreamFile.close();
+    }
+}
+
+bool _openRawFrameStream(const String& filename) {
+    if (!sdMutex || !videoFrameBuffers[0] || !videoFrameBuffers[1]) return false;
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300))) return false;
+
+    bool ok = false;
+    do {
+        if (videoRawFile) {
+            videoRawFile.close();
+        }
+
+        videoRawFile = SD.open(filename, FILE_READ);
+        if (!videoRawFile) break;
+
+        uint8_t header[10] = {0};
+        if (videoRawFile.read(header, sizeof(header)) != (int)sizeof(header)) {
+            videoRawFile.close();
+            break;
+        }
+
+        if (!(header[0] == 'V' && header[1] == '1' && header[2] == '6' && header[3] == 'F')) {
+            videoRawFile.close();
+            break;
+        }
+
+        videoRawWidth = (uint16_t)header[4] | ((uint16_t)header[5] << 8);
+        videoRawHeight = (uint16_t)header[6] | ((uint16_t)header[7] << 8);
+        videoRawFps = (uint16_t)header[8] | ((uint16_t)header[9] << 8);
+
+        if (videoRawWidth != TFT_WIDTH || videoRawHeight != TFT_HEIGHT || videoRawFps == 0) {
+            videoRawFile.close();
+            break;
+        }
+
+        videoRawFrameSize = (size_t)videoRawWidth * (size_t)videoRawHeight * 2U;
+        videoRawHeaderSize = sizeof(header);
+        videoTargetFps = videoRawFps;
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    return ok;
+}
+
+bool _readRawFrameToBuffer(uint8_t frameIndex) {
+    if (!sdMutex || !videoRawFile || frameIndex > 1 || !videoFrameBuffers[frameIndex]) return false;
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(150))) return false;
+
+    int readLen = videoRawFile.read(videoFrameBuffers[frameIndex], videoRawFrameSize);
+    xSemaphoreGive(sdMutex);
+    return readLen == (int)videoRawFrameSize;
+}
+
+void _closeRawFrameStream() {
+    if (videoRawFile) {
+        videoRawFile.close();
+    }
+}
+
+static esp_jpeg_image_scale_t _selectJpegScale(uint16_t width, uint16_t height) {
+    size_t maxPixels = videoMjpegDecodeBufferSize / 2U;
+    if (maxPixels == 0) {
+        return JPEG_IMAGE_SCALE_1_8;
+    }
+
+    for (int s = 0; s <= 3; s++) {
+        uint16_t scaledW = width;
+        uint16_t scaledH = height;
+        for (int i = 0; i < s; i++) {
+            scaledW = (uint16_t)((scaledW + 1U) / 2U);
+            scaledH = (uint16_t)((scaledH + 1U) / 2U);
+        }
+        size_t pixels = (size_t)scaledW * (size_t)scaledH;
+        if (pixels <= maxPixels) {
+            return (esp_jpeg_image_scale_t)s;
+        }
+    }
+
+    return JPEG_IMAGE_SCALE_1_8;
+}
+
+static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex) {
+    if (!jpegData || jpegSize < 4 || frameIndex > 1) return false;
+    if (!videoFrameBuffers[frameIndex] || !videoMjpegDecodeBuffer) return false;
+
+    esp_jpeg_image_cfg_t probeCfg = {};
+    probeCfg.indata = (uint8_t*)jpegData;
+    probeCfg.indata_size = jpegSize;
+    probeCfg.out_format = JPEG_IMAGE_FORMAT_RGB565;
+    probeCfg.out_scale = JPEG_IMAGE_SCALE_0;
+
+    esp_jpeg_image_output_t probeOut = {};
+    if (esp_jpeg_get_image_info(&probeCfg, &probeOut) != ESP_OK || probeOut.width == 0 || probeOut.height == 0) {
+        return false;
+    }
+
+    esp_jpeg_image_scale_t scale = _selectJpegScale(probeOut.width, probeOut.height);
+
+    esp_jpeg_image_cfg_t decodeCfg = {};
+    decodeCfg.indata = (uint8_t*)jpegData;
+    decodeCfg.indata_size = jpegSize;
+    decodeCfg.outbuf = videoMjpegDecodeBuffer;
+    decodeCfg.outbuf_size = videoMjpegDecodeBufferSize;
+    decodeCfg.out_format = JPEG_IMAGE_FORMAT_RGB565;
+    decodeCfg.out_scale = scale;
+    decodeCfg.flags.swap_color_bytes = 0;
+
+    esp_jpeg_image_output_t decodeOut = {};
+    if (esp_jpeg_decode(&decodeCfg, &decodeOut) != ESP_OK || decodeOut.width == 0 || decodeOut.height == 0) {
+        return false;
+    }
+
+    uint8_t *target = videoFrameBuffers[frameIndex];
+    memset(target, 0x00, videoRawFrameSize);
+
+    uint16_t drawWidth = decodeOut.width;
+    uint16_t drawHeight = decodeOut.height;
+    if (MJPEG_ROTATE_90_CW) {
+        drawWidth = decodeOut.height;
+        drawHeight = decodeOut.width;
+    }
+
+    uint16_t dstX = 0;
+    uint16_t dstY = 0;
+    uint16_t outW = drawWidth;
+    uint16_t outH = drawHeight;
+
+    uint16_t cropX = 0;
+    uint16_t cropY = 0;
+    uint16_t cropW = drawWidth;
+    uint16_t cropH = drawHeight;
+
+    if (MJPEG_FILL_SCREEN_CROP) {
+        outW = TFT_WIDTH;
+        outH = TFT_HEIGHT;
+
+        uint32_t srcMul = (uint32_t)drawWidth * (uint32_t)TFT_HEIGHT;
+        uint32_t dstMul = (uint32_t)TFT_WIDTH * (uint32_t)drawHeight;
+        if (srcMul > dstMul) {
+            cropW = (uint16_t)(((uint32_t)drawHeight * (uint32_t)TFT_WIDTH) / (uint32_t)TFT_HEIGHT);
+            cropX = (uint16_t)((drawWidth - cropW) / 2U);
+        } else if (srcMul < dstMul) {
+            cropH = (uint16_t)(((uint32_t)drawWidth * (uint32_t)TFT_HEIGHT) / (uint32_t)TFT_WIDTH);
+            cropY = (uint16_t)((drawHeight - cropH) / 2U);
+        }
+    } else {
+        if (outW > TFT_WIDTH || outH > TFT_HEIGHT) {
+            return false;
+        }
+        dstX = (uint16_t)((TFT_WIDTH - outW) / 2U);
+        dstY = (uint16_t)((TFT_HEIGHT - outH) / 2U);
+    }
+
+    for (uint16_t y = 0; y < outH; y++) {
+        for (uint16_t x = 0; x < outW; x++) {
+            uint16_t srcX;
+            uint16_t srcY;
+
+            uint16_t tx = x;
+            uint16_t ty = y;
+            if (MJPEG_FILL_SCREEN_CROP) {
+                tx = (uint16_t)(cropX + ((uint32_t)x * (uint32_t)cropW) / (uint32_t)outW);
+                ty = (uint16_t)(cropY + ((uint32_t)y * (uint32_t)cropH) / (uint32_t)outH);
+            }
+
+            if (MJPEG_ROTATE_90_CW) {
+                srcX = ty;
+                srcY = (uint16_t)(decodeOut.height - 1U - tx);
+            } else {
+                srcX = tx;
+                srcY = ty;
+            }
+
+            if (MJPEG_FLIP_X) {
+                srcX = (uint16_t)(decodeOut.width - 1U - srcX);
+            }
+            if (MJPEG_FLIP_Y) {
+                srcY = (uint16_t)(decodeOut.height - 1U - srcY);
+            }
+
+            size_t srcIndex = ((size_t)srcY * (size_t)decodeOut.width + (size_t)srcX) * 2U;
+            uint8_t lo = videoMjpegDecodeBuffer[srcIndex];
+            uint8_t hi = videoMjpegDecodeBuffer[srcIndex + 1U];
+
+            size_t dstIndex = ((size_t)(dstY + y) * (size_t)TFT_WIDTH + (size_t)(dstX + x)) * 2U;
+            if (MJPEG_SWAP_RGB565_BYTES) {
+                target[dstIndex] = hi;
+                target[dstIndex + 1U] = lo;
+            } else {
+                target[dstIndex] = lo;
+                target[dstIndex + 1U] = hi;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool _openMjpegStream(const String& filename) {
+    if (!sdMutex || !videoFrameBuffers[0] || !videoFrameBuffers[1]) return false;
+    if (!videoMjpegFrameData || !videoMjpegDecodeBuffer || videoMjpegFrameCapacity == 0) return false;
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300))) return false;
+
+    bool ok = false;
+    do {
+        if (videoMjpegFile) {
+            videoMjpegFile.close();
+        }
+
+        videoMjpegFile = SD.open(filename, FILE_READ);
+        if (!videoMjpegFile) break;
+
+        videoMjpegLastReadEof = false;
+        videoTargetFps = 10;
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    return ok;
+}
+
+bool _readMjpegFrameToBuffer(uint8_t frameIndex) {
+    if (!sdMutex || !videoMjpegFile || frameIndex > 1) return false;
+    if (!videoMjpegFrameData || videoMjpegFrameCapacity == 0) return false;
+
+    uint8_t prev = 0;
+    bool foundSoi = false;
+    bool foundEoi = false;
+    bool overflow = false;
+    size_t frameLen = 0;
+    videoMjpegLastReadEof = false;
+
+    uint8_t chunk[2048];
+    while (!foundEoi) {
+        if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(20))) {
+            return false;
+        }
+        int readLen = videoMjpegFile.read(chunk, sizeof(chunk));
+        xSemaphoreGive(sdMutex);
+        if (readLen <= 0) {
+            videoMjpegLastReadEof = true;
+            break;
+        }
+
+        for (int i = 0; i < readLen; i++) {
+            uint8_t b = chunk[i];
+            if (!foundSoi) {
+                if (prev == 0xFF && b == 0xD8) {
+                    if (videoMjpegFrameCapacity < 2) {
+                        overflow = true;
+                        break;
+                    }
+                    videoMjpegFrameData[0] = 0xFF;
+                    videoMjpegFrameData[1] = 0xD8;
+                    frameLen = 2;
+                    foundSoi = true;
+                }
+            } else {
+                if (frameLen < videoMjpegFrameCapacity) {
+                    videoMjpegFrameData[frameLen++] = b;
+                } else {
+                    overflow = true;
+                    break;
+                }
+
+                if (prev == 0xFF && b == 0xD9) {
+                    foundEoi = true;
+                    break;
+                }
+            }
+            prev = b;
+        }
+
+        if (overflow) break;
+    }
+
+    if (!foundSoi || !foundEoi || overflow || frameLen < 4) {
+        return false;
+    }
+
+    return _decodeJpegToFrameBuffer(videoMjpegFrameData, frameLen, frameIndex);
+}
+
+void _closeMjpegStream() {
+    if (videoMjpegFile) {
+        videoMjpegFile.close();
+    }
+    videoMjpegLastReadEof = false;
+}
+
+void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequested) {
+    String lower = videoFilename;
+    lower.toLowerCase();
+    if (!(lower.endsWith(".mjpg") || lower.endsWith(".mjpeg"))) {
+        videoCompanionAudioActive = false;
+        videoCompanionAudioLoop = false;
+        videoCompanionAudioFile = "";
+        return;
+    }
+
+    String audioFile = videoFilename;
+    int dot = audioFile.lastIndexOf('.');
+    if (dot < 0) return;
+    audioFile = audioFile.substring(0, dot) + ".mp3";
+
+    bool exists = false;
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        exists = SD.exists(audioFile);
+        xSemaphoreGive(sdMutex);
+    }
+
+    if (!exists) {
+        videoCompanionAudioActive = false;
+        videoCompanionAudioLoop = false;
+        videoCompanionAudioFile = "";
+        Serial.println("No companion .mp3 found for MJPEG");
+        return;
+    }
+
+    if (_startAudioPlayback(audioFile, loopRequested, 0, false)) {
+        Serial.printf("Companion audio started: %s\n", audioFile.c_str());
+    } else {
+        videoCompanionAudioActive = false;
+        videoCompanionAudioLoop = false;
+        videoCompanionAudioFile = "";
+        Serial.printf("Companion audio failed: %s\n", audioFile.c_str());
+    }
+}
+
+void taskVideoDecode(void *pvParameters) {
+    VideoPacket packet;
+    uint32_t nextFrameAtMs = 0;
+    bool hasPendingPacket = false;
+    VideoPacket pendingPacket;
+    uint8_t nextFrameIndex = 0;
+
+    while (true) {
+        if (!videoPipelineActive || isUploading || currentMediaType != MEDIA_VIDEO) {
+            nextFrameAtMs = 0;
+            hasPendingPacket = false;
+            vTaskDelay(pdMS_TO_TICKS(25));
+            continue;
+        }
+
+        uint32_t nowMs = millis();
+
+        if (videoUseRawFrameStream) {
+            if (nextFrameAtMs == 0) {
+                nextFrameAtMs = nowMs;
+            }
+
+            uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
+            if ((int32_t)(nowMs - nextFrameAtMs) >= 0) {
+                if (_readRawFrameToBuffer(nextFrameIndex)) {
+                    packet.ptsMs = nowMs - videoStartMs;
+                    packet.dataLen = videoFramesDecoded;
+                    packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
+                    packet.color565 = 0;
+                    packet.frameIndex = nextFrameIndex;
+
+                    if (xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
+                        videoFramesDecoded++;
+                        nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
+                    } else {
+                        videoFramesDropped++;
+                    }
+                } else {
+                    videoStreamEof = true;
+                    if (loopEnabled && videoRawFile) {
+                        if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                            videoRawFile.seek(videoRawHeaderSize, SeekSet);
+                            xSemaphoreGive(sdMutex);
+                            videoStartMs = millis();
+                            videoStreamEof = false;
+                        }
+                    } else {
+                        _stopAudioSafely();
+                        vTaskDelay(pdMS_TO_TICKS(25));
+                        continue;
+                    }
+                }
+
+                nextFrameAtMs += framePeriodMs;
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        if (videoUseMjpegStream) {
+            if (nextFrameAtMs == 0) {
+                nextFrameAtMs = nowMs;
+            }
+
+            uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
+            if ((int32_t)(nowMs - nextFrameAtMs) >= 0) {
+                if (videoDisplayQueue && uxQueueSpacesAvailable(videoDisplayQueue) == 0) {
+                    videoFramesDropped++;
+                    nextFrameAtMs = nowMs + framePeriodMs;
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                    continue;
+                }
+
+                if (_readMjpegFrameToBuffer(nextFrameIndex)) {
+                    packet.ptsMs = nowMs - videoStartMs;
+                    packet.dataLen = videoFramesDecoded;
+                    packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
+                    packet.color565 = 0;
+                    packet.frameIndex = nextFrameIndex;
+
+                    if (xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
+                        videoFramesDecoded++;
+                        nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
+                    } else {
+                        videoFramesDropped++;
+                    }
+                } else {
+                    if (videoMjpegLastReadEof) {
+                        videoStreamEof = true;
+                        if (loopEnabled && videoMjpegFile) {
+                            if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                                videoMjpegFile.seek(0, SeekSet);
+                                xSemaphoreGive(sdMutex);
+                                videoStartMs = millis();
+                                videoStreamEof = false;
+                                videoMjpegLastReadEof = false;
+                            }
+                        } else {
+                            _stopAudioSafely();
+                            vTaskDelay(pdMS_TO_TICKS(25));
+                            continue;
+                        }
+                    } else {
+                        videoFramesDropped++;
+                    }
+                }
+
+                nextFrameAtMs += framePeriodMs;
+                if ((int32_t)(nowMs - nextFrameAtMs) > (int32_t)framePeriodMs) {
+                    nextFrameAtMs = nowMs + framePeriodMs;
+                }
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        if (videoUseFileStream) {
+            if (!hasPendingPacket) {
+                if (_readNextVideoPacket(pendingPacket)) {
+                    hasPendingPacket = true;
+                } else {
+                    videoStreamEof = true;
+                    if (loopEnabled && videoStreamFile) {
+                        if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                            videoStreamFile.seek(videoStreamHeaderSize, SeekSet);
+                            xSemaphoreGive(sdMutex);
+                            videoStartMs = millis();
+                            videoStreamEof = false;
+                        }
+                    } else {
+                        _stopAudioSafely();
+                        vTaskDelay(pdMS_TO_TICKS(25));
+                        continue;
+                    }
+                }
+            }
+
+            if (hasPendingPacket) {
+                uint32_t elapsedMs = millis() - videoStartMs;
+                if ((int32_t)(elapsedMs - pendingPacket.ptsMs) >= 0) {
+                    if (xQueueSend(videoDisplayQueue, &pendingPacket, 0) == pdTRUE) {
+                        videoFramesDecoded++;
+                    } else {
+                        videoFramesDropped++;
+                    }
+                    hasPendingPacket = false;
+                }
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
+        // Phase 2 source: synthetic frame producer at target FPS.
+        if (nextFrameAtMs == 0) {
+            nextFrameAtMs = nowMs;
+        }
+
+        uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
+
+        if ((int32_t)(nowMs - nextFrameAtMs) >= 0) {
+            packet.ptsMs = nowMs - videoStartMs;
+            packet.dataLen = videoFramesDecoded;
+            packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
+            packet.color565 = (uint16_t)((((videoFramesDecoded * 3U) & 0x1FU) << 11) |
+                                         (((videoFramesDecoded * 5U) & 0x3FU) << 5) |
+                                         ((videoFramesDecoded * 7U) & 0x1FU));
+            packet.frameIndex = 0;
+
+            if (xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
+                videoFramesDecoded++;
+            } else {
+                videoFramesDropped++;
+            }
+
+            nextFrameAtMs += framePeriodMs;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+void taskDisplayFlush(void *pvParameters) {
+    VideoPacket packet;
+    while (true) {
+        if (!videoPipelineActive || !displayReady || isUploading || currentMediaType != MEDIA_VIDEO) {
+            vTaskDelay(pdMS_TO_TICKS(25));
+            continue;
+        }
+
+        if (xQueueReceive(videoDisplayQueue, &packet, pdMS_TO_TICKS(2)) == pdTRUE) {
+            if ((videoUseRawFrameStream || videoUseMjpegStream) && packet.frameIndex <= 1 && videoFrameBuffers[packet.frameIndex]) {
+                st7789DrawFrameRGB565(videoFrameBuffers[packet.frameIndex], TFT_WIDTH, TFT_HEIGHT);
+            } else {
+                st7789FillColor(packet.color565);
+            }
+
+            uint32_t elapsedMs = millis() - videoStartMs;
+            videoAvDriftMs = (int32_t)elapsedMs - (int32_t)packet.ptsMs;
+            videoFramesDisplayed++;
+            continue;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
 // -------------------- Tasks Setup --------------------
 void setup() {
     Serial.begin(115200);
     delay(1000);
     Serial.println("\n--- ESP32 Haptic Core (ESP8266Audio Version) ---");
+    audioLogger = &Serial;
 
     // Load preferences
     prefs.begin("settings", false);
@@ -501,6 +1564,8 @@ void setup() {
     if (!audioCmdQueue) {
         Serial.println("ERROR: Failed to create audio command queue");
     }
+
+    initDisplayVideoScaffold();
 
     // Initialize custom ESP-IDF Direct DMA Audio Pipeline
     out = new AudioOutputHaptic(I2S_BCLK, I2S_LRC, I2S_DOUT);
@@ -590,6 +1655,8 @@ void setup() {
     xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, 2, &audioTaskHandle, 1);
     xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(taskVideoDecode, "VideoDecodeTask", 12288, NULL, 1, &videoDecodeTaskHandle, 1);
+    xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, NULL, 1, &displayFlushTaskHandle, 0);
 
 }
 //                 }
@@ -688,6 +1755,17 @@ void handleApiPlay() {
         filename = "/" + filename;
     }
 
+    String fnameLower = filename;
+    fnameLower.toLowerCase();
+    if (fnameLower.endsWith(".mjpg") || fnameLower.endsWith(".mjpeg") || fnameLower.endsWith(".vid") || fnameLower.endsWith(".v16")) {
+        if (!_startVideoPlayback(filename, requestedLoop)) {
+            server.send(409, "application/json", "{\"error\":\"Failed to start video playback\"}");
+            return;
+        }
+        server.send(200, "application/json", "{\"status\":\"Video playback configured\",\"filename\":\"" + filename + "\"}");
+        return;
+    }
+
     Serial.printf("AUDIO_CMD_PLAY: %s loop=%s\n", filename.c_str(), requestedLoop ? "true" : "false");
 
     audioAbortRequested = true;
@@ -710,6 +1788,18 @@ void handleApiPlay() {
 
 void handleApiStop() {
     Serial.println("AUDIO_CMD_STOP");
+
+    if (currentMediaType == MEDIA_VIDEO) {
+        _stopAudioSafely();
+        if (videoPacketQueue) xQueueReset(videoPacketQueue);
+        if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
+        videoFramesDecoded = 0;
+        videoFramesDisplayed = 0;
+        videoFramesDropped = 0;
+        videoAvDriftMs = 0;
+        server.send(200, "application/json", "{\"status\":\"Video playback stopped\"}");
+        return;
+    }
 
     audioAbortRequested = true;
     if (audioCmdQueue) {
@@ -931,6 +2021,24 @@ void handleApiStatus() {
     JsonObject v = doc.createNestedObject("volume");
     v["speaker"] = speakerVolumePct;
     v["exciter"] = exciterVolumePct;
+
+    JsonObject video = doc.createNestedObject("video");
+    video["pipeline"] = videoPipelineActive;
+    if (videoUseRawFrameStream) {
+        video["mode"] = "raw-frame";
+    } else if (videoUseMjpegStream) {
+        video["mode"] = "mjpeg";
+    } else if (videoUseFileStream) {
+        video["mode"] = "color-stream";
+    } else {
+        video["mode"] = "synthetic";
+    }
+    video["targetFps"] = videoTargetFps;
+    video["decodedFrames"] = videoFramesDecoded;
+    video["displayedFrames"] = videoFramesDisplayed;
+    video["droppedFrames"] = videoFramesDropped;
+    video["avDriftMs"] = videoAvDriftMs;
+    video["eof"] = videoStreamEof;
     
     doc["uptime"] = millis() / 1000;
     doc["freeHeap"] = ESP.getFreeHeap();
