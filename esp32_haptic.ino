@@ -14,6 +14,7 @@
 
 // ESP8266Audio Libraries
 #include "AudioFileSourceSD.h"
+#include "AudioFileSourcePROGMEM.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
 #include "AudioLogger.h"
@@ -100,7 +101,6 @@ struct VideoPacket {
     uint8_t frameIndex;
 };
 
-QueueHandle_t videoPacketQueue = NULL;
 QueueHandle_t videoDisplayQueue = NULL;
 volatile bool videoPipelineActive = false;
 volatile bool displayReady = false;
@@ -146,13 +146,30 @@ volatile bool videoCompanionAudioActive = false;
 bool videoCompanionAudioLoop = false;
 String videoCompanionAudioFile = "";
 volatile uint32_t videoCompanionAudioStartMs = 0;
+volatile bool videoSdReadInProgress = false;
+uint8_t *videoCompanionMp3Data = NULL;
+size_t videoCompanionMp3Size = 0;
+volatile bool videoCompanionInRam = false;
 
-static const BaseType_t CORE_PLAYBACK = 1;
-static const BaseType_t CORE_CONTROL = 0;
+#define VIDEO_COMPANION_MP3_MAX_BYTES (5U * 1024U * 1024U)
+
+enum VideoStartState : uint8_t {
+    VIDEO_START_IDLE = 0,
+    VIDEO_START_OPENING_STREAM = 1,
+    VIDEO_START_OPENING_AUDIO = 2,
+    VIDEO_START_READY = 3,
+    VIDEO_START_FAILED = 4,
+};
+
+volatile uint32_t videoSessionId = 0;
+volatile uint8_t videoStartState = VIDEO_START_IDLE;
+
+static const BaseType_t CORE_VIDEO = 1;
+static const BaseType_t CORE_SERVICE = 0;
 static const UBaseType_t PRIO_WEB = 1;
 static const UBaseType_t PRIO_LED = 2;
-static const UBaseType_t PRIO_VIDEO = 4;
-static const UBaseType_t PRIO_AUDIO = 5;
+static const UBaseType_t PRIO_VIDEO = 5;
+static const UBaseType_t PRIO_AUDIO = 4;
 static const TickType_t WEB_DELAY_NORMAL = pdMS_TO_TICKS(10);
 static const TickType_t WEB_DELAY_VIDEO = pdMS_TO_TICKS(30);
 static const TickType_t LED_DELAY_NORMAL = pdMS_TO_TICKS(30);
@@ -351,6 +368,10 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
 bool _seekAudioToSeconds(uint32_t positionSec);
 bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs = 50);
 uint32_t _videoPlaybackClockMs();
+void _videoSdReadBegin();
+void _videoSdReadEnd();
+void _releaseCompanionAudioRam();
+bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize);
 extern size_t uploadBytesWritten;
 extern bool uploadHadWriteError;
 
@@ -392,12 +413,15 @@ void _stopAudioSafely() {
         xSemaphoreGive(sdMutex);
     }
 
+    _releaseCompanionAudioRam();
+
     currentFilename = "";
     loopEnabled = false;
     videoCompanionAudioActive = false;
     videoCompanionAudioLoop = false;
     videoCompanionAudioFile = "";
     videoCompanionAudioStartMs = 0;
+    videoStartState = VIDEO_START_IDLE;
     isPaused = false;
 }
 
@@ -424,6 +448,72 @@ void _stopAudioDecoderOnly() {
     if (sdMutex) {
         xSemaphoreGive(sdMutex);
     }
+
+    _releaseCompanionAudioRam();
+}
+
+void _releaseCompanionAudioRam() {
+    if (videoCompanionMp3Data) {
+        free(videoCompanionMp3Data);
+        videoCompanionMp3Data = NULL;
+    }
+    videoCompanionMp3Size = 0;
+    videoCompanionInRam = false;
+}
+
+bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize) {
+    if (!outData || !outSize || !sdMutex) return false;
+    *outData = NULL;
+    *outSize = 0;
+
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(350))) {
+        return false;
+    }
+
+    bool ok = false;
+    do {
+        File src = SD.open(filename, FILE_READ);
+        if (!src) break;
+
+        size_t sz = src.size();
+        if (sz == 0 || sz > VIDEO_COMPANION_MP3_MAX_BYTES) {
+            src.close();
+            break;
+        }
+
+        uint8_t *buffer = (uint8_t*)ps_malloc(sz);
+        if (!buffer) {
+            src.close();
+            break;
+        }
+
+        size_t offset = 0;
+        while (offset < sz) {
+            size_t toRead = min((size_t)2048, sz - offset);
+            int n = src.read(buffer + offset, toRead);
+            if (n <= 0) {
+                break;
+            }
+            offset += (size_t)n;
+
+            if ((offset & 0x7FFFU) == 0U) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+            }
+        }
+        src.close();
+
+        if (offset != sz) {
+            free(buffer);
+            break;
+        }
+
+        *outData = buffer;
+        *outSize = sz;
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    return ok;
 }
 
 bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte, bool updateMediaState) {
@@ -431,6 +521,66 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
         _stopAudioSafely();
     } else {
         _stopAudioDecoderOnly();
+    }
+
+    if (!updateMediaState) {
+        bool success = false;
+        do {
+            Serial.printf("Opening companion audio file (PSRAM): %s\n", filename.c_str());
+
+            String fnameLower = filename;
+            fnameLower.toLowerCase();
+            if (!fnameLower.endsWith(".mp3")) {
+                Serial.println("Unsupported companion audio format");
+                break;
+            }
+
+            if (!_loadFileToPsram(filename, &videoCompanionMp3Data, &videoCompanionMp3Size)) {
+                Serial.println("Failed to preload companion MP3 to PSRAM");
+                break;
+            }
+
+            fileSource = new AudioFileSourcePROGMEM(videoCompanionMp3Data, (int32_t)videoCompanionMp3Size);
+            if (!fileSource) {
+                Serial.println("Failed to create PROGMEM source");
+                break;
+            }
+
+            id3Source = new AudioFileSourceID3(fileSource);
+            mp3 = new AudioGeneratorMP3();
+            if (!id3Source || !mp3) {
+                Serial.println("Failed to create companion decoder pipeline");
+                break;
+            }
+
+            if (!mp3->begin(id3Source, out)) {
+                Serial.println("Failed to start companion MP3 decoder");
+                break;
+            }
+
+            videoCompanionInRam = true;
+            videoCompanionAudioActive = true;
+            videoCompanionAudioLoop = loopRequested;
+            videoCompanionAudioFile = filename;
+            videoCompanionAudioStartMs = millis();
+            isPaused = false;
+            success = true;
+            Serial.println("Companion MP3 started from PSRAM");
+        } while (false);
+
+        if (!success) {
+            if (mp3) { delete mp3; mp3 = NULL; }
+            if (id3Source) { delete id3Source; id3Source = NULL; }
+            if (fileSource) { delete fileSource; fileSource = NULL; }
+            _releaseCompanionAudioRam();
+            videoCompanionAudioActive = false;
+            videoCompanionAudioLoop = false;
+            videoCompanionAudioFile = "";
+            videoCompanionAudioStartMs = 0;
+            isPaused = false;
+        }
+
+        return success;
     }
 
     xSemaphoreTake(sdMutex, portMAX_DELAY);
@@ -462,6 +612,7 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
         }
 
         id3Source = new AudioFileSourceID3(fileSource);
+
         mp3 = new AudioGeneratorMP3();
         if (!id3Source || !mp3) {
             Serial.println("Failed to create decoder pipeline");
@@ -536,6 +687,14 @@ uint32_t _videoPlaybackClockMs() {
     return millis() - videoStartMs;
 }
 
+void _videoSdReadBegin() {
+    videoSdReadInProgress = true;
+}
+
+void _videoSdReadEnd() {
+    videoSdReadInProgress = false;
+}
+
 // -------------------- Tasks --------------------
 void taskWebServer(void *pvParameters) {
     while (true) {
@@ -549,10 +708,17 @@ void taskWebServer(void *pvParameters) {
 }
 
 void taskAudio(void *pvParameters) {
+    uint32_t lastVideoAudioPumpMs = 0;
     while (true) {
-        if (audioAbortRequested && mp3) {
-            _stopAudioSafely();
-            audioAbortRequested = false;
+        if (audioAbortRequested) {
+            if (currentMediaType == MEDIA_VIDEO || videoStartState == VIDEO_START_OPENING_STREAM || videoStartState == VIDEO_START_OPENING_AUDIO) {
+                audioAbortRequested = false;
+            } else if (mp3) {
+                _stopAudioSafely();
+                audioAbortRequested = false;
+            } else {
+                audioAbortRequested = false;
+            }
         }
 
         AudioCommandMessage cmdMsg;
@@ -578,13 +744,33 @@ void taskAudio(void *pvParameters) {
         // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
         if (!isPaused && mp3 && mp3->isRunning()) {
             bool playing = false;
-            
-            // Use a safe pointer check before calling methods on mp3
-            if (mp3 && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10))) {  
+
+            bool isCompanionDuringVideo = (currentMediaType == MEDIA_VIDEO && videoCompanionAudioActive);
+
+            if (isCompanionDuringVideo && videoCompanionInRam) {
+                uint32_t now = millis();
+                if ((now - lastVideoAudioPumpMs) < 3U) {
+                    playing = true;
+                } else if (mp3) {
+                    playing = mp3->loop();
+                    lastVideoAudioPumpMs = now;
+                } else {
+                    playing = true;
+                }
+            } else if (isCompanionDuringVideo) {
+                if (videoSdReadInProgress) {
+                    playing = true;
+                } else if (mp3 && xSemaphoreTake(sdMutex, 0)) {
+                    playing = mp3->loop();
+                    xSemaphoreGive(sdMutex);
+                } else {
+                    playing = true;
+                }
+            } else if (mp3 && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10))) {
                 playing = mp3->loop();
                 xSemaphoreGive(sdMutex);
             } else {
-                playing = true; // Pretend it played just this loop to not stop abruptly
+                playing = true;
             }
             
             if (!playing) {
@@ -614,7 +800,8 @@ void taskAudio(void *pvParameters) {
                 }
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(2)); // Relax watchdogs and yield CPU to let WebServer grab the mutex if needed
+        TickType_t audioDelay = (currentMediaType == MEDIA_VIDEO && videoCompanionAudioActive) ? pdMS_TO_TICKS(5) : pdMS_TO_TICKS(2);
+        vTaskDelay(audioDelay);
     }
 }
 
@@ -700,10 +887,9 @@ void initDisplayVideoScaffold() {
         Serial.println("WARN: MJPEG buffers unavailable; .mjpg/.mjpeg playback disabled.");
     }
 
-    videoPacketQueue = xQueueCreate(24, sizeof(VideoPacket));
     videoDisplayQueue = xQueueCreate(6, sizeof(VideoPacket));
 
-    if (!videoPacketQueue || !videoDisplayQueue) {
+    if (!videoDisplayQueue) {
         Serial.println("WARN: Video queues allocation failed; video pipeline disabled.");
         videoPipelineActive = false;
         return;
@@ -911,10 +1097,8 @@ bool initSt7789Panel() {
 bool _startVideoPlayback(const String& filename, bool loopRequested) {
     _stopAudioSafely();
 
-    currentMediaType = MEDIA_VIDEO;
-    currentFilename = filename;
-    loopEnabled = loopRequested;
-    isPaused = false;
+    videoStartState = VIDEO_START_OPENING_STREAM;
+    videoSessionId++;
 
     videoFramesDecoded = 0;
     videoFramesDisplayed = 0;
@@ -931,29 +1115,46 @@ bool _startVideoPlayback(const String& filename, bool loopRequested) {
     if (lower.endsWith(".v16") || lower.endsWith(".rgb")) {
         videoUseRawFrameStream = _openRawFrameStream(filename);
         if (!videoUseRawFrameStream) {
-            Serial.println("Video raw stream open failed, using synthetic fallback.");
+            Serial.println("Video raw stream open failed.");
+            videoStartState = VIDEO_START_FAILED;
+            return false;
         }
     } else if (lower.endsWith(".mjpg") || lower.endsWith(".mjpeg")) {
         videoUseMjpegStream = _openMjpegStream(filename);
         if (!videoUseMjpegStream) {
-            Serial.println("Video MJPEG stream open failed, using synthetic fallback.");
+            Serial.println("Video MJPEG stream open failed.");
+            videoStartState = VIDEO_START_FAILED;
+            return false;
         }
     } else if (lower.endsWith(".vid")) {
         videoUseFileStream = _openVideoColorStream(filename);
         if (!videoUseFileStream) {
-            Serial.println("Video .vid stream open failed, using synthetic fallback.");
+            Serial.println("Video .vid stream open failed.");
+            videoStartState = VIDEO_START_FAILED;
+            return false;
         }
+    } else {
+        Serial.println("Unsupported video extension.");
+        videoStartState = VIDEO_START_FAILED;
+        return false;
     }
 
-    if (videoPacketQueue) xQueueReset(videoPacketQueue);
     if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
 
+    currentFilename = filename;
+    loopEnabled = loopRequested;
+    isPaused = false;
+
+    videoStartState = VIDEO_START_OPENING_AUDIO;
     _tryStartVideoCompanionAudio(filename, loopRequested);
     if (videoCompanionAudioActive && videoCompanionAudioStartMs != 0) {
         videoStartMs = videoCompanionAudioStartMs;
     } else {
         videoStartMs = millis();
     }
+
+    currentMediaType = MEDIA_VIDEO;
+    videoStartState = VIDEO_START_READY;
 
     const char* modeStr = "synthetic";
     if (videoUseRawFrameStream) modeStr = "raw-frame";
@@ -1002,13 +1203,16 @@ bool _openVideoColorStream(const String& filename) {
 
 bool _readNextVideoPacket(VideoPacket &packet) {
     if (!sdMutex || !videoStreamFile) return false;
+    _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100))) {
+        _videoSdReadEnd();
         return false;
     }
 
     uint8_t buffer[6] = {0};
     int readLen = videoStreamFile.read(buffer, sizeof(buffer));
     xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
 
     if (readLen != (int)sizeof(buffer)) {
         return false;
@@ -1088,10 +1292,15 @@ bool _openRawFrameStream(const String& filename) {
 
 bool _readRawFrameToBuffer(uint8_t frameIndex) {
     if (!sdMutex || !videoRawFile || frameIndex > 1 || !videoFrameBuffers[frameIndex]) return false;
-    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(150))) return false;
+    _videoSdReadBegin();
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(150))) {
+        _videoSdReadEnd();
+        return false;
+    }
 
     int readLen = videoRawFile.read(videoFrameBuffers[frameIndex], videoRawFrameSize);
     xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
     return readLen == (int)videoRawFrameSize;
 }
 
@@ -1292,7 +1501,9 @@ bool _readMjpegFrameBytes(size_t *outFrameLen) {
     videoMjpegLastReadEof = false;
 
     uint8_t chunk[MJPEG_READ_CHUNK_BYTES];
+    _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(60))) {
+        _videoSdReadEnd();
         return false;
     }
 
@@ -1336,6 +1547,7 @@ bool _readMjpegFrameBytes(size_t *outFrameLen) {
     }
 
     xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
 
     if (!foundSoi || !foundEoi || overflow || frameLen < 4) {
         return false;
@@ -1435,8 +1647,10 @@ void taskVideoDecode(void *pvParameters) {
                     videoStreamEof = true;
                     if (loopEnabled && videoRawFile) {
                         if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                                _videoSdReadBegin();
                             videoRawFile.seek(videoRawHeaderSize, SeekSet);
                             xSemaphoreGive(sdMutex);
+                                _videoSdReadEnd();
                             videoStartMs = millis();
                             videoStreamEof = false;
                         }
@@ -1486,8 +1700,10 @@ void taskVideoDecode(void *pvParameters) {
                         videoStreamEof = true;
                         if (loopEnabled && videoMjpegFile) {
                             if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                                _videoSdReadBegin();
                                 videoMjpegFile.seek(0, SeekSet);
                                 xSemaphoreGive(sdMutex);
+                                _videoSdReadEnd();
                                 videoStartMs = millis();
                                 videoStreamEof = false;
                                 videoMjpegLastReadEof = false;
@@ -1731,11 +1947,11 @@ void setup() {
     server.begin();
 
     // Create proper FreeRTOS Tasks
-    xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, PRIO_WEB, NULL, CORE_CONTROL);
-    xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, PRIO_AUDIO, &audioTaskHandle, CORE_PLAYBACK);
-    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, PRIO_LED, NULL, CORE_CONTROL);
-    xTaskCreatePinnedToCore(taskVideoDecode, "VideoDecodeTask", 12288, NULL, PRIO_VIDEO, &videoDecodeTaskHandle, CORE_PLAYBACK);
-    xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, NULL, PRIO_VIDEO, &displayFlushTaskHandle, CORE_PLAYBACK);
+    xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, PRIO_WEB, NULL, CORE_SERVICE);
+    xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, PRIO_AUDIO, &audioTaskHandle, CORE_SERVICE);
+    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, PRIO_LED, NULL, CORE_SERVICE);
+    xTaskCreatePinnedToCore(taskVideoDecode, "VideoDecodeTask", 12288, NULL, PRIO_VIDEO, &videoDecodeTaskHandle, CORE_VIDEO);
+    xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, NULL, PRIO_VIDEO, &displayFlushTaskHandle, CORE_VIDEO);
 
 }
 //                 }
@@ -1841,6 +2057,11 @@ void handleApiPlay() {
     String fnameLower = filename;
     fnameLower.toLowerCase();
     if (fnameLower.endsWith(".mjpg") || fnameLower.endsWith(".mjpeg") || fnameLower.endsWith(".vid") || fnameLower.endsWith(".v16") || fnameLower.endsWith(".rgb")) {
+        audioAbortRequested = false;
+        if (audioCmdQueue) {
+            xQueueReset(audioCmdQueue);
+        }
+
         if (!_startVideoPlayback(filename, requestedLoop)) {
             server.send(409, "application/json", "{\"error\":\"Failed to start video playback\"}");
             return;
@@ -1874,12 +2095,12 @@ void handleApiStop() {
 
     if (currentMediaType == MEDIA_VIDEO) {
         _stopAudioSafely();
-        if (videoPacketQueue) xQueueReset(videoPacketQueue);
         if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
         videoFramesDecoded = 0;
         videoFramesDisplayed = 0;
         videoFramesDropped = 0;
         videoAvDriftMs = 0;
+        videoStartState = VIDEO_START_IDLE;
         server.send(200, "application/json", "{\"status\":\"Video playback stopped\"}");
         return;
     }
@@ -2123,6 +2344,9 @@ void handleApiStatus() {
     video["avDriftMs"] = videoAvDriftMs;
     video["eof"] = videoStreamEof;
     video["companionAudio"] = videoCompanionAudioActive;
+    video["sessionId"] = videoSessionId;
+    video["startState"] = videoStartState;
+    video["companionInRam"] = videoCompanionInRam;
     
     doc["uptime"] = millis() / 1000;
     doc["freeHeap"] = ESP.getFreeHeap();
