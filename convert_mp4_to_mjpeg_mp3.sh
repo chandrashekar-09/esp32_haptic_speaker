@@ -2,8 +2,8 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <input.mp4> [fps] [width] [height]"
-  echo "Default: fps=15 width=280 height=240"
+  echo "Usage: $0 <input.mp4> [fps] [width] [height] [qscale]"
+  echo "Default: fps=15 width=280 height=240 qscale=3"
   exit 1
 fi
 
@@ -11,6 +11,7 @@ INPUT="$1"
 FPS="${2:-15}"
 WIDTH="${3:-280}"
 HEIGHT="${4:-240}"
+QSCALE="${5:-3}"
 
 if [[ ! -f "$INPUT" ]]; then
   echo "Input file not found: $INPUT"
@@ -29,9 +30,11 @@ OUT_MP3="${BASENAME}.mp3"
 echo "Converting video to MJPEG stream: ${OUT_MJPG} (${WIDTH}x${HEIGHT}, ${FPS}fps)"
 ffmpeg -y -i "$INPUT" \
   -an \
-  -vf "fps=${FPS},scale=${WIDTH}:${HEIGHT}:flags=lanczos,format=yuvj420p" \
+  -vf "fps=${FPS},scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=increase:flags=lanczos,crop=${WIDTH}:${HEIGHT},setsar=1" \
+  -sws_flags lanczos+accurate_rnd+full_chroma_int \
   -c:v mjpeg \
-  -q:v 7 \
+  -q:v "${QSCALE}" \
+  -pix_fmt yuvj420p \
   -f mjpeg \
   "$OUT_MJPG"
 
