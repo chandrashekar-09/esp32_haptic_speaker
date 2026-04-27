@@ -89,12 +89,25 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  filename:
-                    type: string
-                  size:
-                    type: integer
+                $ref: '#/components/schemas/UploadSuccessResponse'
+        '507':
+          description: Upload failed due to SD write/storage issue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadErrorResponse'
+
+  /api/media/storage:
+    get:
+      tags: [Media]
+      summary: Get SD storage and upload diagnostics
+      responses:
+        '200':
+          description: SD usage and upload state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageInfo'
                     
   /api/media/files:
     get:
@@ -459,7 +472,50 @@ components:
           type: integer
         type:
           type: string
-          enum: [audio, video]
+          enum: [audio, video, partial, unknown]
+
+    UploadSuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: Upload done
+        written:
+          type: integer
+
+    UploadErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        received:
+          type: integer
+        written:
+          type: integer
+        partial:
+          type: string
+
+    StorageInfo:
+      type: object
+      properties:
+        total_bytes:
+          type: integer
+        used_bytes:
+          type: integer
+        free_bytes:
+          type: integer
+        is_uploading:
+          type: boolean
+        upload_received:
+          type: integer
+        upload_written:
+          type: integer
+        upload_error:
+          type: boolean
+        upload_error_message:
+          type: string
+        upload_partial:
+          type: string
           
     PlaybackStatus:
       type: object

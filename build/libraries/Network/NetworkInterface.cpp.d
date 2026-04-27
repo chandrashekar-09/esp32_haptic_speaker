@@ -5,7 +5,7 @@
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_event/include/esp_event_base.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_err.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/newlib/platform_include/stdio.h \
- /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/qio_qspi/include/sdkconfig.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/qio_opi/include/sdkconfig.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_compiler.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_netif/include/esp_netif_ip_addr.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_event/include/esp_event.h \

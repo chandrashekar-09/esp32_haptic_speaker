@@ -2,7 +2,7 @@
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/ssl_client.cpp \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Arduino.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/newlib/platform_include/stdio.h \
- /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/qio_qspi/include/sdkconfig.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/qio_opi/include/sdkconfig.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/esp_arduino_version.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/freertos/config/include/freertos/FreeRTOSConfig.h \

@@ -3,7 +3,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <SPI.h>
-#include <SD.h>
+#include <SD_MMC.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <jpeg_decoder.h>
@@ -11,9 +11,10 @@
 // ESP-IDF Low-Level I2S
 #include <driver/i2s_std.h>
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 
 // ESP8266Audio Libraries
-#include "AudioFileSourceSD.h"
+#include "AudioFileSourceFS.h"
 #include "AudioFileSourcePROGMEM.h"
 #include "AudioFileSourceID3.h"
 #include "AudioGeneratorMP3.h"
@@ -25,6 +26,10 @@
 #define SPI_SCLK 12
 #define SPI_MISO 13
 #define SD_CS    10
+
+#define SDMMC_CLK_PIN SPI_SCLK
+#define SDMMC_CMD_PIN SPI_MOSI
+#define SDMMC_D0_PIN  SPI_MISO
 
 #define I2S_BCLK 5
 #define I2S_LRC  6
@@ -58,6 +63,8 @@ Preferences prefs;
 TaskHandle_t audioTaskHandle = NULL;
 TaskHandle_t videoDecodeTaskHandle = NULL;
 TaskHandle_t displayFlushTaskHandle = NULL;
+TaskHandle_t webServerTaskHandle = NULL;
+TaskHandle_t ledTaskHandle = NULL;
 
 // -------------------- LED Globals -------------
 CRGB leds[NUM_LEDS];
@@ -73,6 +80,7 @@ bool loopEnabled = false;
 String currentFilename = "";
 bool isPaused = false;
 volatile bool isUploading = false;
+volatile bool uploadTasksSuspended = false;
 
 enum MediaType { MEDIA_NONE, MEDIA_AUDIO, MEDIA_VIDEO };
 MediaType currentMediaType = MEDIA_NONE;
@@ -88,10 +96,14 @@ struct AudioCommandMessage {
     char filename[192];
     bool loopRequested;
     uint32_t positionSec;
+    uint32_t sessionId;
 };
 
 QueueHandle_t audioCmdQueue = NULL;
 volatile bool audioAbortRequested = false;
+volatile uint32_t mediaSessionId = 0;
+volatile uint32_t activeSessionId = 0;
+volatile bool stopRequested = false;
 
 struct VideoPacket {
     uint32_t ptsMs;
@@ -164,7 +176,7 @@ enum VideoStartState : uint8_t {
 };
 
 volatile uint32_t videoSessionId = 0;
-volatile uint8_t videoStartState = VIDEO_START_IDLE;
+volatile uint8_t videoStart_state = VIDEO_START_IDLE;
 
 static const BaseType_t CORE_VIDEO = 1;
 static const BaseType_t CORE_SERVICE = 0;
@@ -189,6 +201,7 @@ private:
     int _bclk, _lrc, _dout;
     int _sampleRate = 44100;
     i2s_chan_handle_t tx_chan; // IDF v5 channel handle
+    volatile uint64_t _framesRendered = 0;
 public:
     float leftVol = 0.5f;
     float rightVol = 0.75f;
@@ -219,6 +232,11 @@ public:
     // Base class does not define SetBitsPerSample/SetChannels so we drop 'override' or omit
     bool SetBitsPerSample(int bits) { return true; } // Forced to 16-bit
     bool SetChannels(int channels) { return true; }  // Forced to Stereo DIN
+    void resetClock() { _framesRendered = 0; }
+    uint32_t clockMs() const {
+        if (_sampleRate <= 0) return 0;
+        return (uint32_t)((_framesRendered * 1000ULL) / (uint64_t)_sampleRate);
+    }
 
     virtual bool begin() override {
         // 1. Allocate an I2S TX channel (IDF v5)
@@ -263,6 +281,8 @@ public:
             return false;
         }
 
+        resetClock();
+
         return true;
     }
 
@@ -280,6 +300,9 @@ public:
         
         size_t bytes_written = 0;
         esp_err_t err = i2s_channel_write(tx_chan, &scaled, 4, &bytes_written, pdMS_TO_TICKS(20));
+        if (err == ESP_OK && bytes_written >= 4) {
+            _framesRendered += 1ULL;
+        }
         return err == ESP_OK;
     }
     
@@ -306,6 +329,7 @@ public:
             if (err != ESP_OK) {
                 return processed;
             }
+            _framesRendered += ((uint64_t)bytes_written / 4ULL);
             processed += toProcess;
         }
         return count;
@@ -343,7 +367,9 @@ void handleApiPowerToggle();
 void handleApiBattery();
 void handleApiMediaDelete();
 void handleApiMediaUpload();
+void handleApiMediaStorage();
 void handleCorsOptions();
+void taskUploadWorker(void *pvParameters);
 void taskVideoDecode(void *pvParameters);
 void taskDisplayFlush(void *pvParameters);
 void initDisplayVideoScaffold();
@@ -352,7 +378,7 @@ void st7789WriteCommand(uint8_t command, const uint8_t *data, size_t dataLen);
 void st7789SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void st7789FillColor(uint16_t color);
 void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height);
-bool _startVideoPlayback(const String& filename, bool loopRequested);
+bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t sessionId);
 bool _openVideoColorStream(const String& filename);
 bool _readNextVideoPacket(VideoPacket &packet);
 void _closeVideoColorStream();
@@ -368,7 +394,7 @@ void _closeMjpegStream();
 void _stopAudioDecoderOnly();
 void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequested);
 void updateAudioVolumeAndBalance();
-bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0, bool updateMediaState = true);
+bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte = 0, bool updateMediaState = true, uint32_t sessionId = 0);
 bool _seekAudioToSeconds(uint32_t positionSec);
 bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs = 50);
 uint32_t _videoPlaybackClockMs();
@@ -377,7 +403,11 @@ void _videoSdReadEnd();
 void _releaseCompanionAudioRam();
 bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize);
 extern size_t uploadBytesWritten;
+extern size_t uploadBytesReceived;
 extern bool uploadHadWriteError;
+extern String uploadErrorMessage;
+extern String uploadPartialPath;
+extern volatile bool uploadProcessingDone;
 
 SemaphoreHandle_t sdMutex = NULL;
 
@@ -417,6 +447,10 @@ void _stopAudioSafely() {
         xSemaphoreGive(sdMutex);
     }
 
+    if (out) {
+        out->resetClock();
+    }
+
     _releaseCompanionAudioRam();
 
     currentFilename = "";
@@ -425,7 +459,10 @@ void _stopAudioSafely() {
     videoCompanionAudioLoop = false;
     videoCompanionAudioFile = "";
     videoCompanionAudioStartMs = 0;
-    videoStartState = VIDEO_START_IDLE;
+    if (stopRequested) {
+        activeSessionId = 0;
+    }
+    videoStart_state = VIDEO_START_IDLE;
     isPaused = false;
 }
 
@@ -453,6 +490,10 @@ void _stopAudioDecoderOnly() {
         xSemaphoreGive(sdMutex);
     }
 
+    if (out) {
+        out->resetClock();
+    }
+
     _releaseCompanionAudioRam();
 }
 
@@ -476,7 +517,7 @@ bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize
 
     bool ok = false;
     do {
-        File src = SD.open(filename, FILE_READ);
+        File src = SD_MMC.open(filename, FILE_READ);
         if (!src) break;
 
         size_t sz = src.size();
@@ -520,7 +561,11 @@ bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize
     return ok;
 }
 
-bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte, bool updateMediaState) {
+bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte, bool updateMediaState, uint32_t sessionId) {
+    if (stopRequested || (sessionId != 0 && sessionId != mediaSessionId)) {
+        return false;
+    }
+
     if (updateMediaState) {
         _stopAudioSafely();
     } else {
@@ -562,11 +607,16 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
                 break;
             }
 
+            if (out) {
+                out->resetClock();
+            }
+
             videoCompanionInRam = true;
             videoCompanionAudioActive = true;
             videoCompanionAudioLoop = loopRequested;
             videoCompanionAudioFile = filename;
             videoCompanionAudioStartMs = millis();
+            activeSessionId = (sessionId != 0) ? sessionId : mediaSessionId;
             isPaused = false;
             success = true;
             Serial.println("Companion MP3 started from PSRAM");
@@ -581,6 +631,7 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             videoCompanionAudioLoop = false;
             videoCompanionAudioFile = "";
             videoCompanionAudioStartMs = 0;
+            activeSessionId = 0;
             isPaused = false;
         }
 
@@ -600,7 +651,7 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             break;
         }
 
-        fileSource = new AudioFileSourceSD(filename.c_str());
+        fileSource = new AudioFileSourceFS(SD_MMC, filename.c_str());
         if (!fileSource || !fileSource->isOpen()) {
             Serial.println("Failed to open media file");
             break;
@@ -629,15 +680,21 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             break;
         }
 
+        if (out) {
+            out->resetClock();
+        }
+
         if (updateMediaState) {
             currentMediaType = MEDIA_AUDIO;
             currentFilename = filename;
             loopEnabled = loopRequested;
+            activeSessionId = (sessionId != 0) ? sessionId : mediaSessionId;
         } else {
             videoCompanionAudioActive = true;
             videoCompanionAudioLoop = loopRequested;
             videoCompanionAudioFile = filename;
             videoCompanionAudioStartMs = millis();
+            activeSessionId = (sessionId != 0) ? sessionId : mediaSessionId;
         }
         isPaused = false;
         Serial.println("Starting MP3 Audio Decoder...");
@@ -656,11 +713,13 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             currentMediaType = MEDIA_NONE;
             currentFilename = "";
             loopEnabled = false;
+            activeSessionId = 0;
         } else {
             videoCompanionAudioActive = false;
             videoCompanionAudioLoop = false;
             videoCompanionAudioFile = "";
             videoCompanionAudioStartMs = 0;
+            activeSessionId = 0;
         }
         isPaused = false;
     }
@@ -676,7 +735,7 @@ bool _seekAudioToSeconds(uint32_t positionSec) {
 
     const uint32_t assumedBitrateKbps = 128;
     uint64_t targetByte = (uint64_t)positionSec * assumedBitrateKbps * 1000ULL / 8ULL;
-    return _startAudioPlayback(currentFilename, loopEnabled, (uint32_t)targetByte);
+    return _startAudioPlayback(currentFilename, loopEnabled, (uint32_t)targetByte, true, activeSessionId);
 }
 
 bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs) {
@@ -685,8 +744,16 @@ bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs) {
 }
 
 uint32_t _videoPlaybackClockMs() {
-    if (videoCompanionAudioActive && videoCompanionAudioStartMs != 0) {
-        return millis() - videoCompanionAudioStartMs;
+    if (videoCompanionAudioActive) {
+        if (out) {
+            uint32_t audioMs = out->clockMs();
+            if (audioMs > 0) {
+                return audioMs;
+            }
+        }
+        if (videoCompanionAudioStartMs != 0) {
+            return millis() - videoCompanionAudioStartMs;
+        }
     }
     return millis() - videoStartMs;
 }
@@ -697,6 +764,22 @@ void _videoSdReadBegin() {
 
 void _videoSdReadEnd() {
     videoSdReadInProgress = false;
+}
+
+void _setUploadTaskSuspension(bool suspendTasks) {
+    if (suspendTasks) {
+        if (uploadTasksSuspended) return;
+        if (videoDecodeTaskHandle) vTaskSuspend(videoDecodeTaskHandle);
+        if (displayFlushTaskHandle) vTaskSuspend(displayFlushTaskHandle);
+        if (ledTaskHandle) vTaskSuspend(ledTaskHandle);
+        uploadTasksSuspended = true;
+    } else {
+        if (!uploadTasksSuspended) return;
+        if (videoDecodeTaskHandle) vTaskResume(videoDecodeTaskHandle);
+        if (displayFlushTaskHandle) vTaskResume(displayFlushTaskHandle);
+        if (ledTaskHandle) vTaskResume(ledTaskHandle);
+        uploadTasksSuspended = false;
+    }
 }
 
 // -------------------- Tasks --------------------
@@ -715,24 +798,25 @@ void taskAudio(void *pvParameters) {
     uint32_t lastVideoAudioPumpMs = 0;
     while (true) {
         if (audioAbortRequested) {
-            if (currentMediaType == MEDIA_VIDEO || videoStartState == VIDEO_START_OPENING_STREAM || videoStartState == VIDEO_START_OPENING_AUDIO) {
-                audioAbortRequested = false;
-            } else if (mp3) {
-                _stopAudioSafely();
-                audioAbortRequested = false;
-            } else {
-                audioAbortRequested = false;
-            }
+            _stopAudioSafely();
+            audioAbortRequested = false;
         }
 
         AudioCommandMessage cmdMsg;
         while (xQueueReceive(audioCmdQueue, &cmdMsg, 0) == pdTRUE) {
+            if (cmdMsg.sessionId != 0 && cmdMsg.sessionId != mediaSessionId) {
+                continue;
+            }
+
             if (cmdMsg.cmd == CMD_PLAY) {
                 audioAbortRequested = false;
-                _startAudioPlayback(String(cmdMsg.filename), cmdMsg.loopRequested, 0);
+                stopRequested = false;
+                _startAudioPlayback(String(cmdMsg.filename), cmdMsg.loopRequested, 0, true, cmdMsg.sessionId);
             } else if (cmdMsg.cmd == CMD_STOP) {
+                stopRequested = true;
                 audioAbortRequested = true;
                 _stopAudioSafely();
+                activeSessionId = 0;
                 audioAbortRequested = false;
             } else if (cmdMsg.cmd == CMD_SEEK) {
                 audioAbortRequested = false;
@@ -781,21 +865,23 @@ void taskAudio(void *pvParameters) {
                 if (currentMediaType == MEDIA_AUDIO) {
                     String finishedTrack = currentFilename;
                     bool shouldLoop = loopEnabled;
+                    uint32_t sessionAtEnd = activeSessionId;
                     _stopAudioSafely();
 
-                    if (shouldLoop && finishedTrack.length() > 0) {
+                    if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
                         Serial.println("Restarting loop...");
-                        _startAudioPlayback(finishedTrack, true, 0, true);
+                        _startAudioPlayback(finishedTrack, true, 0, true, sessionAtEnd);
                     } else {
                         Serial.println("Playback finished naturally");
                     }
                 } else if (videoCompanionAudioActive) {
                     String finishedTrack = videoCompanionAudioFile;
                     bool shouldLoop = videoCompanionAudioLoop;
+                    uint32_t sessionAtEnd = activeSessionId;
                     _stopAudioDecoderOnly();
 
-                    if (shouldLoop && finishedTrack.length() > 0) {
-                        _startAudioPlayback(finishedTrack, true, 0, false);
+                    if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
+                        _startAudioPlayback(finishedTrack, true, 0, false, sessionAtEnd);
                     } else {
                         videoCompanionAudioActive = false;
                         videoCompanionAudioLoop = false;
@@ -1098,10 +1184,14 @@ bool initSt7789Panel() {
     return true;
 }
 
-bool _startVideoPlayback(const String& filename, bool loopRequested) {
+bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t sessionId) {
+    if (stopRequested || sessionId != mediaSessionId) {
+        return false;
+    }
+
     _stopAudioSafely();
 
-    videoStartState = VIDEO_START_OPENING_STREAM;
+    videoStart_state = VIDEO_START_OPENING_STREAM;
     videoSessionId++;
 
     videoFramesDecoded = 0;
@@ -1120,36 +1210,48 @@ bool _startVideoPlayback(const String& filename, bool loopRequested) {
         videoUseRawFrameStream = _openRawFrameStream(filename);
         if (!videoUseRawFrameStream) {
             Serial.println("Video raw stream open failed.");
-            videoStartState = VIDEO_START_FAILED;
+            videoStart_state = VIDEO_START_FAILED;
             return false;
         }
     } else if (lower.endsWith(".mjpg") || lower.endsWith(".mjpeg")) {
         videoUseMjpegStream = _openMjpegStream(filename);
         if (!videoUseMjpegStream) {
             Serial.println("Video MJPEG stream open failed.");
-            videoStartState = VIDEO_START_FAILED;
+            videoStart_state = VIDEO_START_FAILED;
             return false;
         }
     } else if (lower.endsWith(".vid")) {
         videoUseFileStream = _openVideoColorStream(filename);
         if (!videoUseFileStream) {
             Serial.println("Video .vid stream open failed.");
-            videoStartState = VIDEO_START_FAILED;
+            videoStart_state = VIDEO_START_FAILED;
             return false;
         }
     } else {
         Serial.println("Unsupported video extension.");
-        videoStartState = VIDEO_START_FAILED;
+        videoStart_state = VIDEO_START_FAILED;
         return false;
     }
 
     if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
 
+    if (stopRequested || sessionId != mediaSessionId) {
+        _closeVideoColorStream();
+        _closeRawFrameStream();
+        _closeMjpegStream();
+        videoUseFileStream = false;
+        videoUseRawFrameStream = false;
+        videoUseMjpegStream = false;
+        videoStart_state = VIDEO_START_FAILED;
+        return false;
+    }
+
     currentFilename = filename;
     loopEnabled = loopRequested;
     isPaused = false;
+    activeSessionId = sessionId;
 
-    videoStartState = VIDEO_START_OPENING_AUDIO;
+    videoStart_state = VIDEO_START_OPENING_AUDIO;
     _tryStartVideoCompanionAudio(filename, loopRequested);
     if (videoCompanionAudioActive && videoCompanionAudioStartMs != 0) {
         videoStartMs = videoCompanionAudioStartMs;
@@ -1158,7 +1260,8 @@ bool _startVideoPlayback(const String& filename, bool loopRequested) {
     }
 
     currentMediaType = MEDIA_VIDEO;
-    videoStartState = VIDEO_START_READY;
+    stopRequested = false;
+    videoStart_state = VIDEO_START_READY;
 
     const char* modeStr = "synthetic";
     if (videoUseRawFrameStream) modeStr = "raw-frame";
@@ -1181,7 +1284,7 @@ bool _openVideoColorStream(const String& filename) {
             videoStreamFile.close();
         }
 
-        videoStreamFile = SD.open(filename, FILE_READ);
+        videoStreamFile = SD_MMC.open(filename, FILE_READ);
         if (!videoStreamFile) {
             break;
         }
@@ -1206,9 +1309,15 @@ bool _openVideoColorStream(const String& filename) {
 }
 
 bool _readNextVideoPacket(VideoPacket &packet) {
-    if (!sdMutex || !videoStreamFile) return false;
+    if (!sdMutex) return false;
     _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100))) {
+        _videoSdReadEnd();
+        return false;
+    }
+
+    if (!videoStreamFile) {
+        xSemaphoreGive(sdMutex);
         _videoSdReadEnd();
         return false;
     }
@@ -1248,7 +1357,7 @@ bool _openRawFrameStream(const String& filename) {
             videoRawFile.close();
         }
 
-        videoRawFile = SD.open(filename, FILE_READ);
+        videoRawFile = SD_MMC.open(filename, FILE_READ);
         if (!videoRawFile) break;
 
         String lower = filename;
@@ -1295,9 +1404,15 @@ bool _openRawFrameStream(const String& filename) {
 }
 
 bool _readRawFrameToBuffer(uint8_t frameIndex) {
-    if (!sdMutex || !videoRawFile || frameIndex > 1 || !videoFrameBuffers[frameIndex]) return false;
+    if (!sdMutex || frameIndex > 1 || !videoFrameBuffers[frameIndex]) return false;
     _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(150))) {
+        _videoSdReadEnd();
+        return false;
+    }
+
+    if (!videoRawFile) {
+        xSemaphoreGive(sdMutex);
         _videoSdReadEnd();
         return false;
     }
@@ -1309,17 +1424,23 @@ bool _readRawFrameToBuffer(uint8_t frameIndex) {
 }
 
 bool _skipRawFrames(uint32_t frameCount) {
-    if (!sdMutex || !videoRawFile || frameCount == 0 || videoRawFrameSize == 0) return false;
+    if (!sdMutex || frameCount == 0 || videoRawFrameSize == 0) return false;
     _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(80))) {
         _videoSdReadEnd();
         return false;
     }
 
+    if (!videoRawFile) {
+        xSemaphoreGive(sdMutex);
+        _videoSdReadEnd();
+        return false;
+    }
+
     uint64_t skipBytes = (uint64_t)videoRawFrameSize * (uint64_t)frameCount;
-    uint64_t curPos = (uint64_t)videoRawFile.position();
+    uint64_t cur_pos = (uint64_t)videoRawFile.position();
     uint64_t fileSize = (uint64_t)videoRawFile.size();
-    uint64_t newPos = curPos + skipBytes;
+    uint64_t newPos = cur_pos + skipBytes;
     if (newPos > fileSize) {
         newPos = fileSize;
     }
@@ -1486,7 +1607,7 @@ bool _openMjpegStream(const String& filename) {
             videoMjpegFile.close();
         }
 
-        videoMjpegFile = SD.open(filename, FILE_READ);
+        videoMjpegFile = SD_MMC.open(filename, FILE_READ);
         if (!videoMjpegFile) break;
 
         videoMjpegLastReadEof = false;
@@ -1517,7 +1638,7 @@ bool _readMjpegFrameToBuffer(uint8_t frameIndex) {
 bool _readMjpegFrameBytes(size_t *outFrameLen) {
     if (!outFrameLen) return false;
     *outFrameLen = 0;
-    if (!sdMutex || !videoMjpegFile || !videoMjpegFrameData || videoMjpegFrameCapacity == 0) return false;
+    if (!sdMutex || !videoMjpegFrameData || videoMjpegFrameCapacity == 0) return false;
 
     uint8_t prev = 0;
     bool foundSoi = false;
@@ -1529,6 +1650,12 @@ bool _readMjpegFrameBytes(size_t *outFrameLen) {
     uint8_t chunk[MJPEG_READ_CHUNK_BYTES];
     _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(60))) {
+        _videoSdReadEnd();
+        return false;
+    }
+
+    if (!videoMjpegFile) {
+        xSemaphoreGive(sdMutex);
         _videoSdReadEnd();
         return false;
     }
@@ -1619,7 +1746,7 @@ void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequeste
 
     bool exists = false;
     if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        exists = SD.exists(audioFile);
+        exists = SD_MMC.exists(audioFile);
         xSemaphoreGive(sdMutex);
     }
 
@@ -1632,7 +1759,7 @@ void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequeste
         return;
     }
 
-    if (_startAudioPlayback(audioFile, loopRequested, 0, false)) {
+    if (_startAudioPlayback(audioFile, loopRequested, 0, false, activeSessionId)) {
         Serial.printf("Companion audio started: %s\n", audioFile.c_str());
     } else {
         videoCompanionAudioActive = false;
@@ -1646,6 +1773,7 @@ void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequeste
 void taskVideoDecode(void *pvParameters) {
     VideoPacket packet;
     uint32_t nextFrameAtMs = 0;
+    uint32_t frameRemainderAcc = 0;
     bool hasPendingPacket = false;
     VideoPacket pendingPacket;
     uint8_t nextFrameIndex = 0;
@@ -1653,6 +1781,7 @@ void taskVideoDecode(void *pvParameters) {
     while (true) {
         if (!videoPipelineActive || isUploading || currentMediaType != MEDIA_VIDEO) {
             nextFrameAtMs = 0;
+            frameRemainderAcc = 0;
             hasPendingPacket = false;
             vTaskDelay(pdMS_TO_TICKS(25));
             continue;
@@ -1663,12 +1792,15 @@ void taskVideoDecode(void *pvParameters) {
         if (videoUseRawFrameStream) {
             if (nextFrameAtMs == 0) {
                 nextFrameAtMs = nowMs;
+                frameRemainderAcc = 0;
             }
 
             uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
+            uint32_t framePeriodRem = (videoTargetFps == 0) ? 10 : (1000UL % videoTargetFps);
             if (videoCompanionAudioActive && framePeriodMs > 0) {
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
-                uint32_t expectedPtsMs = videoFramesDecoded * framePeriodMs;
+                uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
+                uint32_t expectedPtsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
                 int32_t lagMs = (int32_t)playbackClockMs - (int32_t)expectedPtsMs;
                 if (lagMs > VIDEO_LAG_SKIP_THRESHOLD_MS) {
                     uint32_t framesToSkip = (uint32_t)lagMs / framePeriodMs;
@@ -1684,18 +1816,18 @@ void taskVideoDecode(void *pvParameters) {
 
             if ((int32_t)(nowMs - nextFrameAtMs) >= 0) {
                 if (_readRawFrameToBuffer(nextFrameIndex)) {
-                    packet.ptsMs = videoFramesDecoded * framePeriodMs;
+                    uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
+                    packet.ptsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
                     packet.dataLen = videoFramesDecoded;
                     packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
                     packet.color565 = 0;
                     packet.frameIndex = nextFrameIndex;
 
-                    if (xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
-                        videoFramesDecoded++;
-                        nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
-                    } else {
+                    if (xQueueSend(videoDisplayQueue, &packet, 0) != pdTRUE) {
                         videoFramesDropped++;
                     }
+                    videoFramesDecoded++;
+                    nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
                 } else {
                     videoStreamEof = true;
                     if (loopEnabled && videoRawFile) {
@@ -1715,6 +1847,12 @@ void taskVideoDecode(void *pvParameters) {
                 }
 
                 nextFrameAtMs += framePeriodMs;
+                frameRemainderAcc += framePeriodRem;
+                uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
+                if (frameRemainderAcc >= fpsNow) {
+                    nextFrameAtMs += 1U;
+                    frameRemainderAcc -= fpsNow;
+                }
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
                 if (videoCompanionAudioActive && (int32_t)(playbackClockMs - nextFrameAtMs) > (int32_t)VIDEO_LAG_CRITICAL_MS) {
                     nextFrameAtMs = playbackClockMs;
@@ -1728,12 +1866,15 @@ void taskVideoDecode(void *pvParameters) {
         if (videoUseMjpegStream) {
             if (nextFrameAtMs == 0) {
                 nextFrameAtMs = nowMs;
+                frameRemainderAcc = 0;
             }
 
             uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
+            uint32_t framePeriodRem = (videoTargetFps == 0) ? 10 : (1000UL % videoTargetFps);
             if (videoCompanionAudioActive && framePeriodMs > 0) {
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
-                uint32_t expectedPtsMs = videoFramesDecoded * framePeriodMs;
+                uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
+                uint32_t expectedPtsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
                 int32_t lagMs = (int32_t)playbackClockMs - (int32_t)expectedPtsMs;
                 if (lagMs > VIDEO_LAG_SKIP_THRESHOLD_MS) {
                     uint32_t framesToSkip = (uint32_t)lagMs / framePeriodMs;
@@ -1756,18 +1897,18 @@ void taskVideoDecode(void *pvParameters) {
                 }
 
                 if (_readMjpegFrameToBuffer(nextFrameIndex)) {
-                    packet.ptsMs = videoFramesDecoded * framePeriodMs;
+                    uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
+                    packet.ptsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
                     packet.dataLen = videoFramesDecoded;
                     packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
                     packet.color565 = 0;
                     packet.frameIndex = nextFrameIndex;
 
-                    if (xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
-                        videoFramesDecoded++;
-                        nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
-                    } else {
+                    if (xQueueSend(videoDisplayQueue, &packet, 0) != pdTRUE) {
                         videoFramesDropped++;
                     }
+                    videoFramesDecoded++;
+                    nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
                 } else {
                     if (videoMjpegLastReadEof) {
                         videoStreamEof = true;
@@ -1792,6 +1933,12 @@ void taskVideoDecode(void *pvParameters) {
                 }
 
                 nextFrameAtMs += framePeriodMs;
+                frameRemainderAcc += framePeriodRem;
+                uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
+                if (frameRemainderAcc >= fpsNow) {
+                    nextFrameAtMs += 1U;
+                    frameRemainderAcc -= fpsNow;
+                }
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
                 if (videoCompanionAudioActive && (int32_t)(playbackClockMs - nextFrameAtMs) > (int32_t)VIDEO_LAG_CRITICAL_MS) {
                     nextFrameAtMs = playbackClockMs;
@@ -1844,6 +1991,7 @@ void taskVideoDecode(void *pvParameters) {
         // Phase 2 source: synthetic frame producer at target FPS.
         if (nextFrameAtMs == 0) {
             nextFrameAtMs = nowMs;
+            frameRemainderAcc = 0;
         }
 
         uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
@@ -1920,14 +2068,15 @@ void setup() {
     ledColorHex = prefs.getString("led_color", "#FF0000");
     FastLED.setBrightness(ledBrightness);
 
-    // Initialize SPI and SD
-    SPI.begin(SPI_SCLK, SPI_MISO, SPI_MOSI);
-    SPI.setFrequency(4000000); // 4MHz for stable SD reading with ESP8266Audio
-    
-    if (!SD.begin(SD_CS)) {
-        Serial.println("SD Card initialization failed!");
+    // Initialize SD_MMC (1-bit mode)
+    if (!SD_MMC.setPins(SDMMC_CLK_PIN, SDMMC_CMD_PIN, SDMMC_D0_PIN)) {
+        Serial.println("SD_MMC pin configuration failed!");
+    }
+
+    if (!SD_MMC.begin("/sdcard", true)) {
+        Serial.println("SD_MMC initialization failed!");
     } else {
-        Serial.println("SD Card initialized.");
+        Serial.println("SD_MMC initialized.");
     }
 
     sdMutex = xSemaphoreCreateMutex();
@@ -1984,13 +2133,46 @@ void setup() {
     server.on("/api/media/delete", HTTP_OPTIONS, handleCorsOptions);
     // Note: Upload multipart route isn't easily done in server.on without huge callbacks. Using standard for now.
     server.on("/api/media/upload", HTTP_POST, [](){
+        uint32_t waitStartMs = millis();
+        while (!uploadProcessingDone && (millis() - waitStartMs) < 15000U) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+        }
+
+        DynamicJsonDocument resp(512);
+        if (!uploadProcessingDone) {
+            resp["error"] = "Upload finalize timeout";
+            resp["received"] = uploadBytesReceived;
+            resp["written"] = uploadBytesWritten;
+            if (uploadPartialPath.length()) {
+                resp["partial"] = uploadPartialPath;
+            }
+            String payload;
+            serializeJson(resp, payload);
+            server.send(504, "application/json", payload);
+            return;
+        }
+
         if (uploadHadWriteError) {
-            server.send(500, "application/json", "{\"error\":\"Upload failed during SD write\"}");
+            resp["error"] = uploadErrorMessage.length() ? uploadErrorMessage : "Upload failed during SD write";
+            resp["received"] = uploadBytesReceived;
+            resp["written"] = uploadBytesWritten;
+            if (uploadPartialPath.length()) {
+                resp["partial"] = uploadPartialPath;
+            }
+            String payload;
+            serializeJson(resp, payload);
+            server.send(507, "application/json", payload);
         } else {
-            server.send(200, "application/json", String("{\"status\":\"Upload done\",\"written\":") + uploadBytesWritten + "}");
+            resp["status"] = "Upload done";
+            resp["written"] = uploadBytesWritten;
+            String payload;
+            serializeJson(resp, payload);
+            server.send(200, "application/json", payload);
         }
     }, handleApiMediaUpload);
     server.on("/api/media/upload", HTTP_OPTIONS, handleCorsOptions);
+    server.on("/api/media/storage", HTTP_GET, handleApiMediaStorage);
+    server.on("/api/media/storage", HTTP_OPTIONS, handleCorsOptions);
 
     server.on("/api/led/mode", HTTP_POST, handleApiLedMode);
     server.on("/api/led/mode", HTTP_OPTIONS, handleCorsOptions);
@@ -2023,9 +2205,9 @@ void setup() {
     server.begin();
 
     // Create proper FreeRTOS Tasks
-    xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, PRIO_WEB, NULL, CORE_SERVICE);
+    xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, NULL, PRIO_WEB, &webServerTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, PRIO_AUDIO, &audioTaskHandle, CORE_SERVICE);
-    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, PRIO_LED, NULL, CORE_SERVICE);
+    xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, PRIO_LED, &ledTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskVideoDecode, "VideoDecodeTask", 12288, NULL, PRIO_VIDEO, &videoDecodeTaskHandle, CORE_VIDEO);
     xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, NULL, PRIO_VIDEO, &displayFlushTaskHandle, CORE_VIDEO);
 
@@ -2062,12 +2244,17 @@ void updateAudioVolumeAndBalance() {
 
 // -------------------- API Handlers (Core 0) --------------------
 void handleApiFiles() {
+    if (isUploading) {
+        server.send(503, "application/json", "{\"error\":\"Upload in progress\"}");
+        return;
+    }
+
     DynamicJsonDocument doc(4096);
     JsonArray files = doc.createNestedArray("files");
 
     TickType_t waitTicks = (currentMediaType == MEDIA_VIDEO) ? pdMS_TO_TICKS(15) : portMAX_DELAY;
     if (xSemaphoreTake(sdMutex, waitTicks)) {
-        File root = SD.open("/");
+        File root = SD_MMC.open("/");
         if (!root) {
             xSemaphoreGive(sdMutex);
             server.send(500, "application/json", "{\"error\":\"Failed to open directory\"}");
@@ -2085,6 +2272,10 @@ void handleApiFiles() {
                 name.toLowerCase();
                 if (name.endsWith(".mp3")) {
                     f["type"] = "audio";
+                } else if (name.endsWith(".mjpg") || name.endsWith(".mjpeg") || name.endsWith(".vid") || name.endsWith(".v16") || name.endsWith(".rgb")) {
+                    f["type"] = "video";
+                } else if (name.endsWith(".part")) {
+                    f["type"] = "partial";
                 } else {
                     f["type"] = "unknown";
                 }
@@ -2106,6 +2297,11 @@ void handleApiFiles() {
 }
 
 void handleApiPlay() {
+    if (isUploading) {
+        server.send(503, "application/json", "{\"error\":\"Upload in progress\"}");
+        return;
+    }
+
     if (!server.hasArg("plain")) {
         server.send(400, "application/json", "{\"error\":\"No body\"}");
         return;
@@ -2126,6 +2322,9 @@ void handleApiPlay() {
     }
 
     bool requestedLoop = doc["loop"] | false;
+    mediaSessionId++;
+    uint32_t requestedSessionId = mediaSessionId;
+    stopRequested = false;
     if (!filename.startsWith("/")) {
         filename = "/" + filename;
     }
@@ -2138,7 +2337,7 @@ void handleApiPlay() {
             xQueueReset(audioCmdQueue);
         }
 
-        if (!_startVideoPlayback(filename, requestedLoop)) {
+        if (!_startVideoPlayback(filename, requestedLoop, requestedSessionId)) {
             server.send(409, "application/json", "{\"error\":\"Failed to start video playback\"}");
             return;
         }
@@ -2156,6 +2355,7 @@ void handleApiPlay() {
     AudioCommandMessage cmd = {};
     cmd.cmd = CMD_PLAY;
     cmd.loopRequested = requestedLoop;
+    cmd.sessionId = requestedSessionId;
     strncpy(cmd.filename, filename.c_str(), sizeof(cmd.filename) - 1);
 
     if (!_enqueueAudioCommand(cmd, 100)) {
@@ -2169,29 +2369,22 @@ void handleApiPlay() {
 void handleApiStop() {
     Serial.println("AUDIO_CMD_STOP");
 
-    if (currentMediaType == MEDIA_VIDEO) {
-        _stopAudioSafely();
-        if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
-        videoFramesDecoded = 0;
-        videoFramesDisplayed = 0;
-        videoFramesDropped = 0;
-        videoAvDriftMs = 0;
-        videoStartState = VIDEO_START_IDLE;
-        server.send(200, "application/json", "{\"status\":\"Video playback stopped\"}");
-        return;
-    }
+    stopRequested = true;
+    mediaSessionId++;
+    activeSessionId = 0;
 
-    audioAbortRequested = true;
     if (audioCmdQueue) {
         xQueueReset(audioCmdQueue);
     }
 
-    AudioCommandMessage cmd = {};
-    cmd.cmd = CMD_STOP;
-    if (!_enqueueAudioCommand(cmd, 100)) {
-        server.send(503, "application/json", "{\"error\":\"Audio command queue busy\"}");
-        return;
-    }
+    audioAbortRequested = true;
+    _stopAudioSafely();
+    if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
+    videoFramesDecoded = 0;
+    videoFramesDisplayed = 0;
+    videoFramesDropped = 0;
+    videoAvDriftMs = 0;
+    videoStart_state = VIDEO_START_IDLE;
 
     server.send(200, "application/json", "{\"status\":\"Playback stopped\"}");
 }
@@ -2421,7 +2614,7 @@ void handleApiStatus() {
     video["eof"] = videoStreamEof;
     video["companionAudio"] = videoCompanionAudioActive;
     video["sessionId"] = videoSessionId;
-    video["startState"] = videoStartState;
+    video["startState"] = videoStart_state;
     video["companionInRam"] = videoCompanionInRam;
     
     doc["uptime"] = millis() / 1000;
@@ -2448,6 +2641,11 @@ void handleApiBattery() {
 }
 
 void handleApiMediaDelete() {
+    if (isUploading) {
+        server.send(503, "application/json", "{\"error\":\"Upload in progress\"}");
+        return;
+    }
+
     if (!server.hasArg("filename")) {
         server.send(400, "application/json", "{\"error\":\"Missing filename query parameter\"}");
         return;
@@ -2462,7 +2660,7 @@ void handleApiMediaDelete() {
     
     TickType_t waitTicks = (currentMediaType == MEDIA_VIDEO) ? pdMS_TO_TICKS(20) : portMAX_DELAY;
     if (xSemaphoreTake(sdMutex, waitTicks)) {
-        if (SD.remove(fname)) {
+        if (SD_MMC.remove(fname)) {
             server.send(200, "application/json", "{\"status\":\"File deleted\"}");
         } else {
             server.send(404, "application/json", "{\"error\":\"File not found or locked\"}");
@@ -2473,58 +2671,445 @@ void handleApiMediaDelete() {
     }
 }
 
+void handleApiMediaStorage() {
+    DynamicJsonDocument doc(512);
+
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(120)) != pdTRUE) {
+        server.send(503, "application/json", "{\"error\":\"SD busy\"}");
+        return;
+    }
+
+    uint64_t totalBytes = SD_MMC.totalBytes();
+    uint64_t usedBytes = SD_MMC.usedBytes();
+    xSemaphoreGive(sdMutex);
+
+    if (totalBytes == 0 || usedBytes > totalBytes) {
+        server.send(500, "application/json", "{\"error\":\"Failed to query SD storage stats\"}");
+        return;
+    }
+
+    uint64_t freeBytes = totalBytes - usedBytes;
+    doc["total_bytes"] = (uint32_t)totalBytes;
+    doc["used_bytes"] = (uint32_t)usedBytes;
+    doc["free_bytes"] = (uint32_t)freeBytes;
+    doc["is_uploading"] = isUploading;
+    doc["upload_received"] = uploadBytesReceived;
+    doc["upload_written"] = uploadBytesWritten;
+    doc["upload_error"] = uploadHadWriteError;
+    if (uploadErrorMessage.length()) {
+        doc["upload_error_message"] = uploadErrorMessage;
+    }
+    if (uploadPartialPath.length()) {
+        doc["upload_partial"] = uploadPartialPath;
+    }
+
+    String response;
+    serializeJson(doc, response);
+    server.send(200, "application/json", response);
+}
+
 File uploadFile;
-uint8_t *uploadBuffer = NULL;
-size_t uploadBufferIndex = 0;
-size_t actualBufferSize = 0;
+uint8_t *uploadWriteScratch = NULL;
 size_t uploadBytesWritten = 0;
+size_t uploadBytesReceived = 0;
+size_t uploadExpectedBytes = 0;
 bool uploadHadWriteError = false;
-const size_t DESIRED_BUFFER_SIZE = 8 * 1024; // 8KB Internal RAM Buffer (Safer for SPI FATFS)
+String uploadErrorMessage = "";
+String uploadTargetPath = "";
+String uploadPartialPath = "";
+volatile bool uploadProcessingDone = true;
+size_t uploadBytesSinceFlush = 0;
+
+const size_t UPLOAD_WRITE_CHUNK_SIZE = 4096;
+const size_t UPLOAD_QUEUE_CHUNK_SIZE = 2048;
+const uint8_t UPLOAD_QUEUE_DEPTH = 10;
 const uint8_t UPLOAD_MAX_WRITE_RETRIES = 5;
+const size_t UPLOAD_PRECHECK_MARGIN_BYTES = 64 * 1024;
+const size_t UPLOAD_FLUSH_INTERVAL_BYTES = 256 * 1024;
+const TickType_t UPLOAD_SD_LOCK_WAIT_TICKS = pdMS_TO_TICKS(120);
+const TickType_t UPLOAD_QUEUE_SEND_WAIT_TICKS = pdMS_TO_TICKS(1000);
+const size_t UPLOAD_YIELD_INTERVAL_BYTES = 8 * 1024;
 
-void _flushUploadBuffer() {
-    if (uploadFile && uploadBuffer && uploadBufferIndex > 0) {
-        if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-            size_t requested = uploadBufferIndex;
-            size_t totalWritten = 0;
-            uint8_t retries = 0;
+size_t uploadBytesSinceYield = 0;
+QueueHandle_t uploadWorkQueue = NULL;
+TaskHandle_t uploadWorkerTaskHandle = NULL;
 
-            while (totalWritten < requested) {
-                size_t justWritten = uploadFile.write(uploadBuffer + totalWritten, requested - totalWritten);
-                if (justWritten == 0) {
-                    retries++;
-                    if (retries >= UPLOAD_MAX_WRITE_RETRIES) {
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(2));
-                    continue;
-                }
-                totalWritten += justWritten;
-                retries = 0;
-            }
+enum UploadWorkType : uint8_t {
+    UPLOAD_WORK_START = 0,
+    UPLOAD_WORK_DATA = 1,
+    UPLOAD_WORK_END = 2,
+    UPLOAD_WORK_ABORT = 3,
+};
 
-            if (totalWritten != requested) {
-                uploadHadWriteError = true;
-            }
-            uploadBytesWritten += totalWritten;
-            xSemaphoreGive(sdMutex);
-        }
-        uploadBufferIndex = 0;
-        // Yield momentarily to let watchdog reset
+struct UploadWorkItem {
+    UploadWorkType type;
+    uint32_t totalSize;
+    uint16_t dataLen;
+    char filename[192];
+    uint8_t data[UPLOAD_QUEUE_CHUNK_SIZE];
+};
+
+void _uploadYieldIfNeeded(size_t processedBytes = 0) {
+    uploadBytesSinceYield += processedBytes;
+    if (uploadBytesSinceYield >= UPLOAD_YIELD_INTERVAL_BYTES) {
+        uploadBytesSinceYield = 0;
         vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+void _setUploadError(const String &msg) {
+    if (!uploadHadWriteError) {
+        uploadErrorMessage = msg;
+    }
+    uploadHadWriteError = true;
+}
+
+bool _getSdStatsLocked(uint64_t *totalBytes, uint64_t *usedBytes) {
+    if (!totalBytes || !usedBytes) return false;
+    *totalBytes = 0;
+    *usedBytes = 0;
+    uint64_t total = SD_MMC.totalBytes();
+    uint64_t used = SD_MMC.usedBytes();
+    if (total == 0 || used > total) return false;
+    *totalBytes = total;
+    *usedBytes = used;
+    return true;
+}
+
+String _formatSdSpaceLocked() {
+    uint64_t totalBytes = 0;
+    uint64_t usedBytes = 0;
+    if (!_getSdStatsLocked(&totalBytes, &usedBytes)) {
+        return "sd_space=unknown";
+    }
+    uint64_t freeBytes = totalBytes - usedBytes;
+    return String("sd_free=") + (uint32_t)(freeBytes / 1024ULL) + "KB sd_used=" + (uint32_t)(usedBytes / 1024ULL) + "KB sd_total=" + (uint32_t)(totalBytes / 1024ULL) + "KB";
+}
+
+uint32_t _readFileSizeWithRetriesLocked(const String &path, uint8_t retries = 4) {
+    uint32_t best = 0;
+    for (uint8_t i = 0; i < retries; i++) {
+        if (!path.length() || !SD_MMC.exists(path)) {
+            if (i < retries - 1) {
+                vTaskDelay(pdMS_TO_TICKS(5));
+            }
+            continue;
+        }
+        File file = SD_MMC.open(path, FILE_READ);
+        if (file) {
+            uint32_t sz = file.size();
+            file.close();
+            if (sz > best) {
+                best = sz;
+            }
+        }
+        if (i < retries - 1) {
+            vTaskDelay(pdMS_TO_TICKS(5));
+        }
+    }
+    return best;
+}
+
+size_t _writeUploadChunkLocked(const uint8_t *data, size_t len) {
+    if (!data || len == 0 || !uploadFile) return 0;
+
+    uint8_t lockRetries = 0;
+    while (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) != pdTRUE) {
+        lockRetries++;
+        if (lockRetries >= UPLOAD_MAX_WRITE_RETRIES) {
+            _setUploadError("Failed to lock SD mutex during chunk write (timeout)");
+            return 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+
+    size_t totalWritten = 0;
+    uint8_t retries = 0;
+    while (totalWritten < len) {
+        size_t pending = len - totalWritten;
+        size_t toWrite = (pending > UPLOAD_WRITE_CHUNK_SIZE) ? UPLOAD_WRITE_CHUNK_SIZE : pending;
+
+        const uint8_t *writePtr = data + totalWritten;
+        if (uploadWriteScratch && toWrite <= UPLOAD_WRITE_CHUNK_SIZE) {
+            memcpy(uploadWriteScratch, writePtr, toWrite);
+            writePtr = uploadWriteScratch;
+        }
+
+        size_t justWritten = uploadFile.write(writePtr, toWrite);
+        if (justWritten == 0) {
+            retries++;
+            if (retries >= UPLOAD_MAX_WRITE_RETRIES) {
+                _setUploadError(String("SD_MMC write returned 0 repeatedly at offset=") + (uint32_t)totalWritten + " len=" + (uint32_t)len + " " + _formatSdSpaceLocked());
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(2));
+            continue;
+        }
+        if (justWritten != toWrite) {
+            totalWritten += justWritten;
+            _setUploadError(String("Chunk short write requested=") + (uint32_t)toWrite + " written=" + (uint32_t)justWritten);
+            break;
+        }
+        totalWritten += justWritten;
+        uploadBytesSinceFlush += justWritten;
+        if (uploadBytesSinceFlush >= UPLOAD_FLUSH_INTERVAL_BYTES) {
+            uploadFile.flush();
+            uploadBytesSinceFlush = 0;
+        }
+        _uploadYieldIfNeeded(justWritten);
+        retries = 0;
+    }
+
+    xSemaphoreGive(sdMutex);
+    return totalWritten;
+}
+
+bool _ensureUploadWorker() {
+    if (uploadWorkQueue && uploadWorkerTaskHandle) {
+        return true;
+    }
+
+    if (!uploadWorkQueue) {
+        uploadWorkQueue = xQueueCreate(UPLOAD_QUEUE_DEPTH, sizeof(UploadWorkItem));
+        if (!uploadWorkQueue) {
+            _setUploadError("Failed to create upload queue");
+            return false;
+        }
+    }
+
+    if (!uploadWorkerTaskHandle) {
+        if (xTaskCreatePinnedToCore(taskUploadWorker, "UploadWorkerTask", 8192, NULL, PRIO_WEB + 1, &uploadWorkerTaskHandle, CORE_SERVICE) != pdPASS) {
+            _setUploadError("Failed to create upload worker task");
+            vQueueDelete(uploadWorkQueue);
+            uploadWorkQueue = NULL;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool _enqueueUploadWorkRaw(const void *itemPtr, const char *context) {
+    if (!uploadWorkQueue) {
+        _setUploadError("Upload queue unavailable");
+        return false;
+    }
+
+    if (xQueueSend(uploadWorkQueue, itemPtr, UPLOAD_QUEUE_SEND_WAIT_TICKS) != pdTRUE) {
+        _setUploadError(String("Upload queue timeout during ") + context);
+        return false;
+    }
+
+    return true;
+}
+
+void taskUploadWorker(void *pvParameters) {
+    (void)pvParameters;
+    UploadWorkItem item;
+
+    while (true) {
+        if (!uploadWorkQueue || xQueueReceive(uploadWorkQueue, &item, portMAX_DELAY) != pdTRUE) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+            continue;
+        }
+
+        if (item.type == UPLOAD_WORK_START) {
+            uploadTargetPath = String(item.filename);
+            uploadPartialPath = "/upload.tmp";
+            uploadExpectedBytes = item.totalSize;
+            uploadBytesWritten = 0;
+            uploadBytesReceived = 0;
+            uploadBytesSinceFlush = 0;
+
+            if (uploadFile) {
+                if (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+                    uploadFile.close();
+                    uploadFile = File();
+                    xSemaphoreGive(sdMutex);
+                }
+            }
+
+            if (!uploadWriteScratch) {
+                uploadWriteScratch = (uint8_t*)heap_caps_malloc(UPLOAD_WRITE_CHUNK_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                if (!uploadWriteScratch) {
+                    _setUploadError("Failed to allocate internal SD write scratch buffer");
+                }
+            }
+
+            if (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+                uint64_t totalBytes = 0;
+                uint64_t usedBytes = 0;
+                uint64_t freeBytes = 0;
+                uint64_t existingTargetBytes = 0;
+                bool statsOk = _getSdStatsLocked(&totalBytes, &usedBytes);
+                if (statsOk) {
+                    freeBytes = totalBytes - usedBytes;
+                }
+
+                if (SD_MMC.exists(uploadTargetPath)) {
+                    File existing = SD_MMC.open(uploadTargetPath, FILE_READ);
+                    if (existing) {
+                        existingTargetBytes = existing.size();
+                        existing.close();
+                    }
+                }
+
+                if (uploadExpectedBytes > 0 && statsOk) {
+                    uint64_t projectedNeed = (uint64_t)uploadExpectedBytes + (uint64_t)UPLOAD_PRECHECK_MARGIN_BYTES;
+                    uint64_t effectiveFree = freeBytes + existingTargetBytes;
+                    if (effectiveFree < projectedNeed) {
+                        _setUploadError(String("Insufficient SD space: need ") + (uint32_t)(projectedNeed / 1024ULL) + "KB, free " + (uint32_t)(effectiveFree / 1024ULL) + "KB.");
+                    }
+                }
+
+                if (SD_MMC.exists(uploadPartialPath)) {
+                    SD_MMC.remove(uploadPartialPath);
+                }
+
+                if (!uploadHadWriteError) {
+                    uploadFile = SD_MMC.open(uploadPartialPath, FILE_WRITE);
+                }
+                if (!uploadFile && !uploadHadWriteError) {
+                    _setUploadError("Failed to open SD file for writing");
+                }
+                xSemaphoreGive(sdMutex);
+            } else {
+                _setUploadError("Failed to lock SD mutex for upload start (timeout)");
+            }
+
+            continue;
+        }
+
+        if (item.type == UPLOAD_WORK_DATA) {
+            uploadBytesReceived += item.dataLen;
+            if (uploadHadWriteError) {
+                continue;
+            }
+            if (!uploadFile) {
+                _setUploadError("Upload file handle is not open");
+                continue;
+            }
+            size_t written = _writeUploadChunkLocked(item.data, item.dataLen);
+            uploadBytesWritten += written;
+            if (written != item.dataLen) {
+                _setUploadError(String("Chunk short write requested=") + (uint32_t)item.dataLen + " written=" + (uint32_t)written);
+            }
+            continue;
+        }
+
+        if (item.type == UPLOAD_WORK_END) {
+            if (!uploadFile && !uploadHadWriteError) {
+                _setUploadError("Upload ended without valid file handle");
+            }
+
+            if (uploadBytesWritten != uploadBytesReceived) {
+                _setUploadError("Mismatch between bytes received and bytes written");
+            }
+            if (uploadExpectedBytes > 0 && uploadBytesWritten != uploadExpectedBytes) {
+                _setUploadError("Mismatch between expected size and bytes written");
+            }
+
+            if (uploadFile) {
+                if (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+                    uploadFile.flush();
+                    uploadFile.close();
+                    uploadFile = File();
+                    uploadBytesSinceFlush = 0;
+
+                    if (!uploadHadWriteError) {
+                        uint32_t partialSize = _readFileSizeWithRetriesLocked(uploadPartialPath);
+
+                        if (partialSize != (uint32_t)uploadBytesWritten) {
+                            _setUploadError(String("Partial file size mismatch partial=") + partialSize + " written=" + (uint32_t)uploadBytesWritten);
+                        } else {
+                            if (uploadTargetPath.length() && SD_MMC.exists(uploadTargetPath)) {
+                                SD_MMC.remove(uploadTargetPath);
+                            }
+                            if (!SD_MMC.rename(uploadPartialPath, uploadTargetPath)) {
+                                _setUploadError("Failed to finalize upload rename");
+                            } else {
+                                uint32_t finalSize = _readFileSizeWithRetriesLocked(uploadTargetPath);
+                                if (finalSize != (uint32_t)uploadBytesWritten) {
+                                    _setUploadError(String("Final file size mismatch final=") + finalSize + " written=" + (uint32_t)uploadBytesWritten);
+                                } else {
+                                    uploadPartialPath = "";
+                                    uploadTargetPath = "";
+                                }
+                            }
+                        }
+                    }
+
+                    xSemaphoreGive(sdMutex);
+                } else {
+                    _setUploadError("Failed to lock SD mutex during upload finalize (timeout)");
+                }
+            }
+
+            if (uploadHadWriteError) {
+                Serial.printf("Upload End With Errors: expected=%u received=%u written=%u reason=%s partial=%s\n", (uint32_t)uploadExpectedBytes, (uint32_t)uploadBytesReceived, (uint32_t)uploadBytesWritten, uploadErrorMessage.c_str(), uploadPartialPath.c_str());
+            } else {
+                Serial.printf("Upload End: %u bytes\n", (uint32_t)uploadBytesWritten);
+                uploadErrorMessage = "";
+            }
+
+            uploadProcessingDone = true;
+            isUploading = false;
+            continue;
+        }
+
+        if (item.type == UPLOAD_WORK_ABORT) {
+            if (uploadFile) {
+                if (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+                    uploadFile.close();
+                    uploadFile = File();
+                    if (uploadPartialPath.length() && SD_MMC.exists(uploadPartialPath)) {
+                        SD_MMC.remove(uploadPartialPath);
+                    }
+                    xSemaphoreGive(sdMutex);
+                }
+            }
+
+            uploadTargetPath = "";
+            uploadPartialPath = "";
+            _setUploadError("Upload aborted by client");
+            uploadProcessingDone = true;
+            isUploading = false;
+            if (uploadWorkQueue) {
+                xQueueReset(uploadWorkQueue);
+            }
+            Serial.println("Upload Aborted by client!");
+        }
     }
 }
 
 void handleApiMediaUpload() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
-        // Hard-stop playback before upload to guarantee exclusive SD access
+        isUploading = true;
+        uploadProcessingDone = false;
+        _setUploadTaskSuspension(true);
+
+        // Non-blocking playback quiesce before upload to avoid stalling HTTP stream start
+        stopRequested = true;
+        mediaSessionId++;
+        activeSessionId = 0;
         audioAbortRequested = true;
         if (audioCmdQueue) {
             xQueueReset(audioCmdQueue);
         }
-        _stopAudioSafely();
-        isUploading = true;
+        if (videoDisplayQueue) {
+            xQueueReset(videoDisplayQueue);
+        }
+        videoFramesDecoded = 0;
+        videoFramesDisplayed = 0;
+        videoFramesDropped = 0;
+        videoAvDriftMs = 0;
+        videoStart_state = VIDEO_START_IDLE;
+        currentMediaType = MEDIA_NONE;
+        currentFilename = "";
+        loopEnabled = false;
+        isPaused = false;
+        _uploadYieldIfNeeded(UPLOAD_QUEUE_CHUNK_SIZE);
 
         // Turn off LEDs immediately to prevent FastLED interrupt starvation during WiFi/SD operation
         FastLED.clear();
@@ -2535,103 +3120,164 @@ void handleApiMediaUpload() {
         
         Serial.printf("Upload Start: %s\n", filename.c_str());
         uploadBytesWritten = 0;
+        uploadBytesReceived = 0;
+        uploadExpectedBytes = upload.totalSize;
+        uploadBytesSinceFlush = 0;
+        uploadBytesSinceYield = 0;
         uploadHadWriteError = false;
-        
-        if (!uploadBuffer) {
-            // Allocate safely in standard 8-bit internal memory (avoid PSRAM DMA issues)
-            uploadBuffer = (uint8_t*)malloc(DESIRED_BUFFER_SIZE);
-            if (uploadBuffer) {
-                actualBufferSize = DESIRED_BUFFER_SIZE;
-                Serial.println("Allocated 8KB internal RAM buffer for SPI safe upload.");
-            } else {
-                actualBufferSize = 1024;
-                uploadBuffer = (uint8_t*)malloc(actualBufferSize);
-                Serial.println("Fallback to 1KB internal RAM buffer.");
+        uploadErrorMessage = "";
+        uploadTargetPath = filename;
+        uploadPartialPath = "/upload.tmp";
+
+        if (!uploadWriteScratch) {
+            uploadWriteScratch = (uint8_t*)heap_caps_malloc(UPLOAD_WRITE_CHUNK_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+            if (!uploadWriteScratch) {
+                _setUploadError("Failed to allocate internal SD write scratch buffer");
             }
         }
-        uploadBufferIndex = 0;
-        
-        if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-            // Remove existing file if it exists to overwrite cleanly
-            if (SD.exists(filename)) {
-                SD.remove(filename);
+
+        if (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+            uint64_t totalBytes = 0;
+            uint64_t usedBytes = 0;
+            uint64_t freeBytes = 0;
+            uint64_t existingTargetBytes = 0;
+            bool statsOk = _getSdStatsLocked(&totalBytes, &usedBytes);
+            if (statsOk) {
+                freeBytes = totalBytes - usedBytes;
             }
-            uploadFile = SD.open(filename, FILE_WRITE);
-            if (!uploadFile) {
-                Serial.println("Failed to open SD file for writing!");
+
+            if (SD_MMC.exists(uploadTargetPath)) {
+                File existing = SD_MMC.open(uploadTargetPath, FILE_READ);
+                if (existing) {
+                    existingTargetBytes = existing.size();
+                    existing.close();
+                }
+            }
+
+            if (uploadExpectedBytes > 0 && statsOk) {
+                uint64_t projectedNeed = (uint64_t)uploadExpectedBytes + (uint64_t)UPLOAD_PRECHECK_MARGIN_BYTES;
+                uint64_t effectiveFree = freeBytes + existingTargetBytes;
+                if (effectiveFree < projectedNeed) {
+                    _setUploadError(String("Insufficient SD space: need ") + (uint32_t)(projectedNeed / 1024ULL) + "KB, free " + (uint32_t)(effectiveFree / 1024ULL) + "KB.");
+                }
+            }
+
+            if (SD_MMC.exists(uploadPartialPath)) {
+                SD_MMC.remove(uploadPartialPath);
+            }
+
+            if (!uploadHadWriteError) {
+                uploadFile = SD_MMC.open(uploadPartialPath, FILE_WRITE);
+            }
+            if (!uploadFile && !uploadHadWriteError) {
+                _setUploadError("Failed to open SD file for writing");
+            }
+            xSemaphoreGive(sdMutex);
+        } else {
+            _setUploadError("Failed to lock SD mutex for upload start (timeout)");
+        }
+
+        if (uploadHadWriteError) {
+            uploadProcessingDone = true;
+            isUploading = false;
+            _setUploadTaskSuspension(false);
+            return;
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        _uploadYieldIfNeeded(upload.currentSize);
+
+        uploadBytesReceived += upload.currentSize;
+
+        if (uploadHadWriteError) {
+            return;
+        }
+
+        if (!uploadFile) {
+            _setUploadError("Upload file handle is not open");
+            return;
+        }
+
+        size_t written = _writeUploadChunkLocked(upload.buf, upload.currentSize);
+        uploadBytesWritten += written;
+        if (written != upload.currentSize) {
+            _setUploadError(String("Chunk short write requested=") + (uint32_t)upload.currentSize + " written=" + (uint32_t)written);
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (!uploadFile && !uploadHadWriteError) {
+            _setUploadError("Upload ended without valid file handle");
+        }
+
+        if (uploadBytesWritten != uploadBytesReceived) {
+            _setUploadError("Mismatch between bytes received and bytes written");
+        }
+        if (uploadExpectedBytes > 0 && uploadBytesWritten != uploadExpectedBytes) {
+            _setUploadError("Mismatch between expected size and bytes written");
+        }
+
+        if (uploadFile) {
+            if (xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+                uploadFile.flush();
+                uploadFile.close();
+                uploadFile = File();
+                uploadBytesSinceFlush = 0;
+
+                if (!uploadHadWriteError) {
+                    uint32_t partialSize = _readFileSizeWithRetriesLocked(uploadPartialPath);
+
+                    if (partialSize != (uint32_t)uploadBytesWritten) {
+                        _setUploadError(String("Partial file size mismatch partial=") + partialSize + " written=" + (uint32_t)uploadBytesWritten);
+                    } else {
+                        if (uploadTargetPath.length() && SD_MMC.exists(uploadTargetPath)) {
+                            SD_MMC.remove(uploadTargetPath);
+                        }
+                        if (!SD_MMC.rename(uploadPartialPath, uploadTargetPath)) {
+                            _setUploadError("Failed to finalize upload rename");
+                        } else {
+                            uint32_t finalSize = _readFileSizeWithRetriesLocked(uploadTargetPath);
+                            if (finalSize != (uint32_t)uploadBytesWritten) {
+                                _setUploadError(String("Final file size mismatch final=") + finalSize + " written=" + (uint32_t)uploadBytesWritten);
+                            } else {
+                                uploadPartialPath = "";
+                                uploadTargetPath = "";
+                            }
+                        }
+                    }
+                }
+
+                xSemaphoreGive(sdMutex);
+            } else {
+                _setUploadError("Failed to lock SD mutex during upload finalize (timeout)");
+            }
+        }
+
+        if (uploadHadWriteError) {
+            Serial.printf("Upload End With Errors: expected=%u received=%u written=%u reason=%s partial=%s\n", (uint32_t)uploadExpectedBytes, (uint32_t)uploadBytesReceived, (uint32_t)uploadBytesWritten, uploadErrorMessage.c_str(), uploadPartialPath.c_str());
+        } else {
+            Serial.printf("Upload End: %u bytes\n", (uint32_t)uploadBytesWritten);
+            uploadErrorMessage = "";
+        }
+
+        uploadProcessingDone = true;
+        isUploading = false;
+        _setUploadTaskSuspension(false);
+    } else if (upload.status == UPLOAD_FILE_ABORTED) {
+        if (uploadFile && xSemaphoreTake(sdMutex, UPLOAD_SD_LOCK_WAIT_TICKS) == pdTRUE) {
+            uploadFile.close();
+            uploadFile = File();
+            if (uploadPartialPath.length() && SD_MMC.exists(uploadPartialPath)) {
+                SD_MMC.remove(uploadPartialPath);
             }
             xSemaphoreGive(sdMutex);
         }
-    } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (uploadFile) {
-            if (uploadBuffer) {
-                size_t remaining = upload.currentSize;
-                uint8_t* ptr = upload.buf;
-                
-                while (remaining > 0) {
-                    size_t spaceLeft = actualBufferSize - uploadBufferIndex;
-                    size_t toCopy = (remaining < spaceLeft) ? remaining : spaceLeft;
-                    
-                    memcpy(&uploadBuffer[uploadBufferIndex], ptr, toCopy);
-                    uploadBufferIndex += toCopy;
-                    ptr += toCopy;
-                    remaining -= toCopy;
-                    
-                    if (uploadBufferIndex >= actualBufferSize) {
-                        _flushUploadBuffer();
-                    }
-                }
-            } else {
-                // Complete fallback if even malloc failed
-                if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-                    size_t written = uploadFile.write(upload.buf, upload.currentSize);
-                    if (written != upload.currentSize) {
-                        Serial.println("SD Write failed or partial write!");
-                    }
-                    xSemaphoreGive(sdMutex);
-                }
-            }
-        }
-    } else if (upload.status == UPLOAD_FILE_END) {
-        if (uploadFile) {
-            _flushUploadBuffer();
-            if (uploadBytesWritten != upload.totalSize) {
-                uploadHadWriteError = true;
-            }
-            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-                uploadFile.flush();
-                uploadFile.close();
-                xSemaphoreGive(sdMutex);
-                if (uploadHadWriteError) {
-                    Serial.printf("Upload End With Errors: %s, expected=%u written=%u\n", upload.filename.c_str(), upload.totalSize, uploadBytesWritten);
-                } else {
-                    Serial.printf("Upload End: %s, %u bytes\n", upload.filename.c_str(), uploadBytesWritten);
-                }
-            }
-        }
-        if (uploadBuffer) {
-            free(uploadBuffer);
-            uploadBuffer = NULL;
-        }
+
+        uploadBytesSinceYield = 0;
+        uploadBytesSinceFlush = 0;
+        uploadTargetPath = "";
+        uploadPartialPath = "";
+        _setUploadError("Upload aborted by client");
+        uploadProcessingDone = true;
         isUploading = false;
-    } else if (upload.status == UPLOAD_FILE_ABORTED) {
-        if (uploadFile) {
-            if (xSemaphoreTake(sdMutex, portMAX_DELAY)) {
-                uploadFile.close();
-                xSemaphoreGive(sdMutex);
-                Serial.println("Upload Aborted by client!");
-                
-                // Delete the incomplete file
-                String filename = upload.filename;
-                if (!filename.startsWith("/")) filename = "/" + filename;
-                SD.remove(filename);
-            }
-        }
-        if (uploadBuffer) {
-            free(uploadBuffer);
-            uploadBuffer = NULL;
-        }
-        uploadHadWriteError = true;
-        isUploading = false;
+        _setUploadTaskSuspension(false);
+        Serial.println("Upload Aborted by client!");
     }
 }

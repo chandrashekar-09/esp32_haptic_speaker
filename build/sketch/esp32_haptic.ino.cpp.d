@@ -1,8 +1,17 @@
 /home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp.o: \
  /home/chandrashekar/Arduino/esp32_haptic/build/sketch/esp32_haptic.ino.cpp \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/FastLED.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/stdint.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/dll.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/force_inline.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/cpp_compat.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/register.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastled_config.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/led_sysdefs.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/arm/is_arm.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Arduino.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/newlib/platform_include/stdio.h \
- /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/qio_qspi/include/sdkconfig.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/qio_opi/include/sdkconfig.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/esp_arduino_version.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/freertos/FreeRTOS-Kernel/include/freertos/FreeRTOS.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/freertos/config/include/freertos/FreeRTOSConfig.h \
@@ -169,15 +178,160 @@
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/freertos_stats.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/io_pin_remap.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Arduino.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/32/led_sysdefs_esp32.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/namespace.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastled_delay.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/types.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/int.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/int.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/int.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/bitswap.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/controller.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/cpixel_ledcontroller.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/pixeltypes.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/types.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/deprecated.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/compiler_control.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/lib8static.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/qfx.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/memmove.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/memfill.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/config.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ease.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastled_progmem.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/null_progmem.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/math8.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/scale8.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/crgb.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/chsv.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/hsv.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/color.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/type_traits.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/move.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/hsv2rgb.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/intmap.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/random8.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/lib8tion/trig8.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/eorder.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/eorder.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/crgb.hpp \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/str.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/geometry.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/math.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/has_include.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/clamp.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/map_range.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/math_macros.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/memory.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/scoped_ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/unique_ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/utility.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/cstddef.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/initializer_list.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/scoped_array.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/allocator.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/inplacenew.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/unused.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/bit_cast.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/bitset.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/bitset_dynamic.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/variant.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/referent.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ptr_impl.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/shared_ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/atomic.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/thread.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/align.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/weak_ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/optional.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/vector.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/functional.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/insert_result.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/span.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/slice.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/pixel_controller.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/rgbw.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/rgbw.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/five_bit_hd_gamma.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/gamma.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/dither_mode.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/pixel_iterator.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/string.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/cled_controller.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/engine_events.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/screenmap.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/lut.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/map.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/assert.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/assert_defs.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/strstream.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/warn.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/dbg.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/sketch_macros.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/esp_assert.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/comparators.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/pair.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/rbtree.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/algorithm.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/random.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/json.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/hash_map.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/hash.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/promise.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/function.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/singleton.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/xymap.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/xmap.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/virtual_if_not_avr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastpin.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastspi_types.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/dmx.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/32/fastled_esp32.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/32/fastpin_esp32.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/esp_version.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/third_party/espressif/led_strip/src/enabled.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/32/clockless_rmt_esp32.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/32/rmt_5/idf5_clockless_rmt_esp32.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/32/rmt_5/idf5_rmt.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/colorutils.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/colorutils.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/blur.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/colorutils_misc.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/fill.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/pixelset.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/colorpalettes.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/noise.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/power_mgt.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastspi.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fastspi_bitbang.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/chipsets.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/chipsets_specialized_ws2812.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/leds.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/clear.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ui.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/audio.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/fft.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/function_list.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ui_impl.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/ui_defs.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/sensors/button.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/sensors/digital_pin.h \
  /home/chandrashekar/Arduino/libraries/ArduinoJson/src/ArduinoJson.h \
  /home/chandrashekar/Arduino/libraries/ArduinoJson/src/ArduinoJson.hpp \
  /home/chandrashekar/Arduino/libraries/ArduinoJson/src/ArduinoJson/Configuration.hpp \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Preferences/src/Preferences.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SPI/src/SPI.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/esp32-hal-spi.h \
- /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD/src/SD.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD_MMC/src/SD_MMC.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/FS/src/FS.h \
- /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD/src/sd_defines.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_driver_sdmmc/include/driver/sdmmc_types.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/sdmmc/include/sd_protocol_types.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/sdmmc/include/sd_pwr_ctrl.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_hw_support/dma/include/esp_dma_utils.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SD_MMC/src/sd_defines.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFi.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Print.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WiFi/src/WiFiType.h \
@@ -232,19 +386,22 @@
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/Uri.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/middleware/Middleware.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/detail/RequestHandler.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/espressif__esp_jpeg/include/jpeg_decoder.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_driver_i2s/include/driver/i2s_std.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/hal/include/hal/i2s_types.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_driver_i2s/include/driver/i2s_common.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_driver_i2s/include/driver/i2s_types.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_types.h \
- /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceSD.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceFS.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSource.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioStatus.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioLogger.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourcePROGMEM.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceID3.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGeneratorMP3.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioGenerator.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutput.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/config.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/libmad/mad.h \
+ /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioLogger.h \
  /home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioOutput.h

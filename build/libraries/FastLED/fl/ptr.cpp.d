@@ -1,0 +1,31 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/libraries/FastLED/fl/ptr.cpp.o: \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ptr.cpp \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/namespace.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/scoped_ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/unique_ptr.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/type_traits.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/stdint.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/move.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/int.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/int.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/arm/is_arm.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/platforms/esp/int.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/utility.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/cstddef.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/initializer_list.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/scoped_array.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/allocator.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/inplacenew.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/memfill.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/unused.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/bit_cast.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/bitset.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/bitset_dynamic.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/math_macros.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/has_include.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/compiler_control.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/variant.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/deprecated.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/referent.h \
+ /home/chandrashekar/Arduino/libraries/FastLED/src/fl/ptr_impl.h

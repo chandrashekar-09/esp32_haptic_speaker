@@ -3,7 +3,7 @@
     "sketch": "esp32_haptic.ino",
     "port": "/dev/ttyACM0",
     "board": "esp32:esp32:esp32s3",
-    "configuration": "PSRAM=opi,FlashSize=16M,PartitionScheme=default_16MB,FlashMode=qio,LoopCore=1,EventsCore=1,USBMode=default",
+    "configuration": "JTAGAdapter=default,PSRAM=opi,FlashMode=qio,FlashSize=16M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=default,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=app3M_fat9M_16MB,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none,ZigbeeMode=default",
     "output": "./build",
     "programmer": "esptool"
 }
