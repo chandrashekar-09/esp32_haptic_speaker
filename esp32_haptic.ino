@@ -178,7 +178,11 @@ uint32_t videoHmjHeaderSize = 0;
 #define MJPEG_SWAP_RGB565_BYTES 1
 #define MJPEG_FLIP_X 0
 #define MJPEG_FLIP_Y 0
-#define MJPEG_ROTATE_90_CW 1                                                                                                                        
+#define MJPEG_ROTATE_90_CW 0
+#define MJPEG_ROTATE_90_CCW 1
+#if MJPEG_ROTATE_90_CW && MJPEG_ROTATE_90_CCW
+#error "Only one MJPEG rotation flag can be enabled."
+#endif
 #define MJPEG_FILL_SCREEN_CROP 1
 #define MJPEG_AUDIO_MAX_SKIP_FRAMES 30
 #define MJPEG_DISPLAY_DROP_LAG_MS 200
@@ -462,9 +466,14 @@ extern String uploadPartialPath;
 extern volatile bool uploadProcessingDone;
 
 SemaphoreHandle_t sdMutex = NULL;
+SemaphoreHandle_t audioMutex = NULL;
 
 // -------------------- Loop (Core 1) --------------------
 void _stopAudioSafely() {
+    if (audioMutex) {
+        // Callers only invoke stop after releasing audioMutex, so blocking here is safe.
+        xSemaphoreTake(audioMutex, portMAX_DELAY);
+    }
     isPaused = true; // Stop play loop entry before deleting memory
     currentMediaType = MEDIA_NONE;
 
@@ -519,10 +528,16 @@ void _stopAudioSafely() {
     }
     videoStart_state = VIDEO_START_IDLE;
     _resetVideoFrameQueues();
+    if (audioMutex) {
+        xSemaphoreGive(audioMutex);
+    }
     isPaused = false;
 }
 
 void _stopAudioDecoderOnly() {
+    if (audioMutex) {
+        xSemaphoreTake(audioMutex, portMAX_DELAY);
+    }
     if (sdMutex) {
         xSemaphoreTake(sdMutex, portMAX_DELAY);
     }
@@ -551,6 +566,9 @@ void _stopAudioDecoderOnly() {
     }
 
     _releaseCompanionAudioRam();
+    if (audioMutex) {
+        xSemaphoreGive(audioMutex);
+    }
 }
 
 void _releaseCompanionAudioRam() {
@@ -631,6 +649,10 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
         _stopAudioDecoderOnly();
     }
 
+    if (audioMutex) {
+        xSemaphoreTake(audioMutex, portMAX_DELAY);
+    }
+
     if (!updateMediaState) {
         bool success = false;
         do {
@@ -694,6 +716,9 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             isPaused = false;
         }
 
+        if (audioMutex) {
+            xSemaphoreGive(audioMutex);
+        }
         return success;
     }
 
@@ -784,6 +809,9 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
     }
 
     xSemaphoreGive(sdMutex);
+    if (audioMutex) {
+        xSemaphoreGive(audioMutex);
+    }
     return success;
 }
 
@@ -879,15 +907,29 @@ void _releaseVideoFrameBuffer(uint8_t frameIndex) {
 }
 
 void _resetVideoFrameQueues() {
-    if (videoDisplayQueue) {
-        xQueueReset(videoDisplayQueue);
+    if (!videoDisplayQueue && !videoFreeFrameQueue) {
+        return;
     }
-    if (!videoFreeFrameQueue) return;
-    xQueueReset(videoFreeFrameQueue);
-    for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
-        if (videoFrameBuffers[i]) {
-            xQueueSend(videoFreeFrameQueue, &i, 0);
+    vTaskSuspendAll();
+    if (videoDisplayQueue) {
+        VideoPacket packet;
+        while (xQueueReceive(videoDisplayQueue, &packet, 0) == pdTRUE) {
+            if (_packetUsesFrameBuffer(packet)) {
+                _releaseVideoFrameBuffer(packet.frameIndex);
+            }
         }
+    }
+    if (videoFreeFrameQueue) {
+        xQueueReset(videoFreeFrameQueue);
+        for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
+            if (videoFrameBuffers[i]) {
+                xQueueSend(videoFreeFrameQueue, &i, 0);
+            }
+        }
+    }
+    // Yield if a higher-priority task was unblocked while the scheduler was suspended.
+    if (xTaskResumeAll() == pdTRUE) {
+        taskYIELD();
     }
 }
 
@@ -926,6 +968,41 @@ void _setUploadTaskSuspension(bool suspendTasks) {
     }
 }
 
+static bool _pumpMp3Playback(bool isCompanionDuringVideo, uint32_t &lastVideoAudioPumpMs) {
+    if (!mp3) return true;
+    if (!sdMutex) return true;
+
+    if (isCompanionDuringVideo && videoCompanionInRam) {
+        uint32_t now = millis();
+        if ((now - lastVideoAudioPumpMs) < 3U) {
+            return true;
+        }
+        bool playing = mp3->loop();
+        lastVideoAudioPumpMs = now;
+        return playing;
+    }
+
+    if (isCompanionDuringVideo) {
+        if (videoSdReadInProgress) {
+            return true;
+        }
+        if (xSemaphoreTake(sdMutex, 0) == pdTRUE) {
+            bool playing = mp3->loop();
+            xSemaphoreGive(sdMutex);
+            return playing;
+        }
+        return true;
+    }
+
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        bool playing = mp3->loop();
+        xSemaphoreGive(sdMutex);
+        return playing;
+    }
+
+    return true;
+}
+
 // -------------------- Tasks --------------------
 void taskWebServer(void *pvParameters) {
     while (true) {
@@ -940,6 +1017,7 @@ void taskWebServer(void *pvParameters) {
 
 void taskAudio(void *pvParameters) {
     uint32_t lastVideoAudioPumpMs = 0;
+    uint32_t lastAudioMutexLogMs = 0;
     while (true) {
         if (audioAbortRequested) {
             _stopAudioSafely();
@@ -974,63 +1052,56 @@ void taskAudio(void *pvParameters) {
         }
 
         // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
-        if (!isPaused && mp3 && mp3->isRunning()) {
-            bool playing = false;
-
-            bool isCompanionDuringVideo = (currentMediaType == MEDIA_VIDEO && videoCompanionAudioActive);
-
-            if (isCompanionDuringVideo && videoCompanionInRam) {
-                uint32_t now = millis();
-                if ((now - lastVideoAudioPumpMs) < 3U) {
-                    playing = true;
-                } else if (mp3) {
-                    playing = mp3->loop();
-                    lastVideoAudioPumpMs = now;
+        bool playing = false;
+        bool hasMp3 = false;
+        bool isCompanionDuringVideo = (currentMediaType == MEDIA_VIDEO && videoCompanionAudioActive);
+        if (!isPaused) {
+            if (audioMutex) {
+                if (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+                    if (mp3 && mp3->isRunning()) {
+                        hasMp3 = true;
+                        playing = _pumpMp3Playback(isCompanionDuringVideo, lastVideoAudioPumpMs);
+                    }
+                    xSemaphoreGive(audioMutex);
                 } else {
+                    uint32_t now = millis();
+                    if ((now - lastAudioMutexLogMs) >= 1000U) {
+                        Serial.println("WARN: Audio mutex busy; skipping pump cycle");
+                        lastAudioMutexLogMs = now;
+                    }
                     playing = true;
                 }
-            } else if (isCompanionDuringVideo) {
-                if (videoSdReadInProgress) {
-                    playing = true;
-                } else if (mp3 && xSemaphoreTake(sdMutex, 0)) {
-                    playing = mp3->loop();
-                    xSemaphoreGive(sdMutex);
-                } else {
-                    playing = true;
-                }
-            } else if (mp3 && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10))) {
-                playing = mp3->loop();
-                xSemaphoreGive(sdMutex);
-            } else {
-                playing = true;
+            } else if (mp3 && mp3->isRunning()) {
+                hasMp3 = true;
+                playing = _pumpMp3Playback(isCompanionDuringVideo, lastVideoAudioPumpMs);
             }
-            
-            if (!playing) {
-                if (currentMediaType == MEDIA_AUDIO) {
-                    String finishedTrack = currentFilename;
-                    bool shouldLoop = loopEnabled;
-                    uint32_t sessionAtEnd = activeSessionId;
-                    _stopAudioSafely();
+        }
 
-                    if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
-                        Serial.println("Restarting loop...");
-                        _startAudioPlayback(finishedTrack, true, 0, true, sessionAtEnd);
-                    } else {
-                        Serial.println("Playback finished naturally");
-                    }
-                } else if (videoCompanionAudioActive) {
-                    String finishedTrack = videoCompanionAudioFile;
-                    bool shouldLoop = videoCompanionAudioLoop;
-                    uint32_t sessionAtEnd = activeSessionId;
-                    _stopAudioDecoderOnly();
+        if (hasMp3 && !playing) {
+            if (currentMediaType == MEDIA_AUDIO) {
+                String finishedTrack = currentFilename;
+                bool shouldLoop = loopEnabled;
+                uint32_t sessionAtEnd = activeSessionId;
+                _stopAudioSafely();
 
-                    if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
-                        _startAudioPlayback(finishedTrack, true, 0, false, sessionAtEnd);
-                    } else {
-                        videoCompanionAudioActive = false;
-                        videoCompanionAudioLoop = false;
-                        videoCompanionAudioFile = "";
-                    }
+                if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
+                    Serial.println("Restarting loop...");
+                    _startAudioPlayback(finishedTrack, true, 0, true, sessionAtEnd);
+                } else {
+                    Serial.println("Playback finished naturally");
+                }
+            } else if (videoCompanionAudioActive) {
+                String finishedTrack = videoCompanionAudioFile;
+                bool shouldLoop = videoCompanionAudioLoop;
+                uint32_t sessionAtEnd = activeSessionId;
+                _stopAudioDecoderOnly();
+
+                if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
+                    _startAudioPlayback(finishedTrack, true, 0, false, sessionAtEnd);
+                } else {
+                    videoCompanionAudioActive = false;
+                    videoCompanionAudioLoop = false;
+                    videoCompanionAudioFile = "";
                 }
             }
         }
@@ -1669,8 +1740,12 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
     }
 
     esp_jpeg_image_scale_t scale = _selectJpegScale(probeOut.width, probeOut.height);
+    const bool rotateCw = (MJPEG_ROTATE_90_CW != 0);
+    const bool rotateCcw = (MJPEG_ROTATE_90_CCW != 0);
+    const bool needsRotate = rotateCw || rotateCcw;
+    const bool needsTransform = needsRotate || MJPEG_FLIP_X || MJPEG_FLIP_Y;
 
-    if (displayNative) {
+    if (displayNative && !needsTransform) {
         if (probeOut.width != TFT_WIDTH || probeOut.height != TFT_HEIGHT) {
             return false;
         }
@@ -1709,7 +1784,7 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
 
     uint16_t drawWidth = decodeOut.width;
     uint16_t drawHeight = decodeOut.height;
-    if (MJPEG_ROTATE_90_CW) {
+    if (needsRotate) {
         drawWidth = decodeOut.height;
         drawHeight = decodeOut.width;
     }
@@ -1757,9 +1832,12 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
                 ty = (uint16_t)(cropY + ((uint32_t)y * (uint32_t)cropH) / (uint32_t)outH);
             }
 
-            if (MJPEG_ROTATE_90_CW) {
+            if (rotateCw) {
                 srcX = ty;
                 srcY = (uint16_t)(decodeOut.height - 1U - tx);
+            } else if (rotateCcw) {
+                srcX = (uint16_t)(decodeOut.width - 1U - ty);
+                srcY = tx;
             } else {
                 srcX = tx;
                 srcY = ty;
@@ -1770,6 +1848,11 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
             }
             if (MJPEG_FLIP_Y) {
                 srcY = (uint16_t)(decodeOut.height - 1U - srcY);
+            }
+
+            // Defensive guard: rotation math should keep coordinates in range.
+            if (srcX >= decodeOut.width || srcY >= decodeOut.height) {
+                continue;
             }
 
             size_t srcIndex = ((size_t)srcY * (size_t)decodeOut.width + (size_t)srcX) * 2U;
@@ -2616,6 +2699,10 @@ void setup() {
     }
 
     sdMutex = xSemaphoreCreateMutex();
+    audioMutex = xSemaphoreCreateMutex();
+    if (!audioMutex) {
+        Serial.println("WARN: Failed to create audio mutex");
+    }
     audioCmdQueue = xQueueCreate(8, sizeof(AudioCommandMessage));
     if (!audioCmdQueue) {
         Serial.println("ERROR: Failed to create audio command queue");
@@ -2932,7 +3019,18 @@ void handleApiStop() {
 
 void handleApiPause() {
     Serial.println("AUDIO_CMD_TOGGLE_PAUSE");
-    if (currentMediaType == MEDIA_AUDIO && mp3) {
+    bool hasMp3 = false;
+    if (currentMediaType == MEDIA_AUDIO) {
+        if (audioMutex) {
+            if (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+                hasMp3 = (mp3 != NULL);
+                xSemaphoreGive(audioMutex);
+            }
+        } else {
+            hasMp3 = (mp3 != NULL);
+        }
+    }
+    if (hasMp3) {
         isPaused = !isPaused;
     }
     server.send(200, "application/json", String("{\"status\":\"Pause/Resume toggled\",\"paused\":") + (isPaused ? "true}" : "false}"));
@@ -2973,6 +3071,8 @@ void handleApiSeek() {
 
 void handleApiCurrent() {
     DynamicJsonDocument doc(512);
+    // WebServer handlers run on a single task; static throttle state keeps warnings to ~1 Hz.
+    static uint32_t lastAudioStatusLockLogMs = 0;
     
     doc["playing"] = (!isPaused && currentMediaType == MEDIA_AUDIO && currentFilename != "");
     doc["paused"] = isPaused;
@@ -2985,19 +3085,36 @@ void handleApiCurrent() {
     doc["type"] = typeStr;
 
     if (currentMediaType == MEDIA_AUDIO) {
-        if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-            if (fileSource && fileSource->isOpen()) {
-                uint32_t pos = fileSource->getPos();
-                uint32_t size = fileSource->getSize();
-                doc["position_bytes"] = pos;
-                doc["size_bytes"] = size;
-                doc["position"] = (uint32_t)((uint64_t)pos * 8ULL / 128000ULL);
-                doc["duration"] = (uint32_t)((uint64_t)size * 8ULL / 128000ULL);
+        bool audioLocked = false;
+        if (audioMutex) {
+            audioLocked = (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(20)) == pdTRUE);
+            if (!audioLocked) {
+                uint32_t now = millis();
+                if ((now - lastAudioStatusLockLogMs) >= 1000U) {
+                    Serial.println("WARN: Audio mutex busy during status read");
+                    lastAudioStatusLockLogMs = now;
+                }
             }
-            if (id3Source) {
-                doc["id3_parsed"] = true; // Ready for album arts down the line
+        }
+        // If the audio mutex failed to initialize, proceed without locking for status reads.
+        if (!audioMutex || audioLocked) {
+            if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
+                if (fileSource && fileSource->isOpen()) {
+                    uint32_t pos = fileSource->getPos();
+                    uint32_t size = fileSource->getSize();
+                    doc["position_bytes"] = pos;
+                    doc["size_bytes"] = size;
+                    doc["position"] = (uint32_t)((uint64_t)pos * 8ULL / 128000ULL);
+                    doc["duration"] = (uint32_t)((uint64_t)size * 8ULL / 128000ULL);
+                }
+                if (id3Source) {
+                    doc["id3_parsed"] = true; // Ready for album arts down the line
+                }
+                xSemaphoreGive(sdMutex);
             }
-            xSemaphoreGive(sdMutex);
+        }
+        if (audioLocked) {
+            xSemaphoreGive(audioMutex);
         }
     }
 
