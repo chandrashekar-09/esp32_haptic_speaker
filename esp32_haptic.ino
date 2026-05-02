@@ -180,6 +180,9 @@ uint32_t videoHmjHeaderSize = 0;
 #define MJPEG_FLIP_Y 0
 #define MJPEG_ROTATE_90_CW 0
 #define MJPEG_ROTATE_90_CCW 1
+#if MJPEG_ROTATE_90_CW && MJPEG_ROTATE_90_CCW
+#error "Only one MJPEG rotation flag can be enabled."
+#endif
 #define MJPEG_FILL_SCREEN_CROP 1
 #define MJPEG_AUDIO_MAX_SKIP_FRAMES 30
 #define MJPEG_DISPLAY_DROP_LAG_MS 200
@@ -468,6 +471,7 @@ SemaphoreHandle_t audioMutex = NULL;
 // -------------------- Loop (Core 1) --------------------
 void _stopAudioSafely() {
     if (audioMutex) {
+        // Callers only invoke stop after releasing audioMutex, so blocking here is safe.
         xSemaphoreTake(audioMutex, portMAX_DELAY);
     }
     isPaused = true; // Stop play loop entry before deleting memory
