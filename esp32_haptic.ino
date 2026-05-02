@@ -6,7 +6,8 @@
 #include <SD_MMC.h>
 #include <WiFi.h>
 #include <WebServer.h>
-#include <jpeg_decoder.h>
+#include <TFT_eSPI.h>
+#include <TJpg_Decoder.h>
 
 // ESP-IDF Low-Level I2S
 #include <driver/i2s_std.h>
@@ -59,6 +60,7 @@ const char* password = "f6s68VHJ89mC";
 // -------------------- Globals --------------------
 WebServer server(80);
 Preferences prefs;
+TFT_eSPI tft = TFT_eSPI();
 
 TaskHandle_t audioTaskHandle = NULL;
 TaskHandle_t videoDecodeTaskHandle = NULL;
@@ -155,6 +157,9 @@ uint8_t *videoMjpegFrameData = NULL;
 size_t videoMjpegFrameCapacity = 0;
 uint8_t *videoMjpegDecodeBuffer = NULL;
 size_t videoMjpegDecodeBufferSize = 0;
+static uint16_t tjpgDecodeWidth = 0;
+static uint16_t tjpgDecodeHeight = 0;
+static uint16_t *tjpgDecodeTarget = NULL;
 volatile bool videoMjpegLastReadEof = false;
 volatile bool videoHmjLastReadEof = false;
 uint16_t videoHmjWidth = TFT_WIDTH;
@@ -228,7 +233,6 @@ static const TickType_t WEB_DELAY_VIDEO = pdMS_TO_TICKS(30);
 static const TickType_t LED_DELAY_NORMAL = pdMS_TO_TICKS(30);
 static const TickType_t LED_DELAY_VIDEO = pdMS_TO_TICKS(50);
 
-SPIClass *tftSpi = NULL;
 SemaphoreHandle_t tftMutex = NULL;
 
 extern SemaphoreHandle_t sdMutex;
@@ -420,8 +424,6 @@ void taskVideoDecode(void *pvParameters);
 void taskDisplayFlush(void *pvParameters);
 void initDisplayVideoScaffold();
 bool initSt7789Panel();
-void st7789WriteCommand(uint8_t command, const uint8_t *data, size_t dataLen);
-void st7789SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void st7789FillColor(uint16_t color);
 void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height);
 bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t sessionId);
@@ -1150,22 +1152,12 @@ void taskLEDs(void *pvParameters) {
 }
 
 void initDisplayVideoScaffold() {
-    pinMode(TFT_CS, OUTPUT);
-    pinMode(TFT_DC, OUTPUT);
-    pinMode(TFT_RST, OUTPUT);
     pinMode(TFT_BL, OUTPUT);
 
-    digitalWrite(TFT_CS, HIGH);
-    digitalWrite(TFT_DC, HIGH);
-    digitalWrite(TFT_RST, HIGH);
     digitalWrite(TFT_BL, HIGH);
 
     tftMutex = xSemaphoreCreateMutex();
-    tftSpi = new SPIClass(HSPI);
-    if (tftSpi) {
-        tftSpi->begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
-        displayReady = initSt7789Panel();
-    }
+    displayReady = initSt7789Panel();
 
     videoRawFrameSize = (size_t)TFT_WIDTH * (size_t)TFT_HEIGHT * 2U;
     bool frameBuffersOk = true;
@@ -1225,185 +1217,29 @@ void initDisplayVideoScaffold() {
     Serial.println("Video scaffold initialized (decode/display active).");
 }
 
-void st7789WriteCommand(uint8_t command, const uint8_t *data, size_t dataLen) {
-    if (!tftSpi) return;
-    if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(20)) != pdTRUE) return;
-
-    tftSpi->beginTransaction(SPISettings(TFT_SPI_HZ, MSBFIRST, SPI_MODE0));
-    digitalWrite(TFT_CS, LOW);
-    digitalWrite(TFT_DC, LOW);
-    tftSpi->transfer(command);
-    if (data && dataLen > 0) {
-        digitalWrite(TFT_DC, HIGH);
-        tftSpi->writeBytes(data, (uint32_t)dataLen);
-    }
-    digitalWrite(TFT_CS, HIGH);
-    tftSpi->endTransaction();
-
-    if (tftMutex) xSemaphoreGive(tftMutex);
-}
-
-void st7789SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-    x0 += TFT_X_OFFSET;
-    x1 += TFT_X_OFFSET;
-    y0 += TFT_Y_OFFSET;
-    y1 += TFT_Y_OFFSET;
-
-    uint8_t colData[4] = {
-        (uint8_t)(x0 >> 8), (uint8_t)(x0 & 0xFF),
-        (uint8_t)(x1 >> 8), (uint8_t)(x1 & 0xFF)
-    };
-    uint8_t rowData[4] = {
-        (uint8_t)(y0 >> 8), (uint8_t)(y0 & 0xFF),
-        (uint8_t)(y1 >> 8), (uint8_t)(y1 & 0xFF)
-    };
-
-    st7789WriteCommand(0x2A, colData, sizeof(colData));
-    st7789WriteCommand(0x2B, rowData, sizeof(rowData));
-    st7789WriteCommand(0x2C, NULL, 0);
-}
-
 void st7789FillColor(uint16_t color) {
-    if (!tftSpi || !displayReady) return;
-    if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(30)) != pdTRUE) return;
-
-    uint8_t lineBuffer[TFT_WIDTH * 2];
-    for (int x = 0; x < TFT_WIDTH; x++) {
-        lineBuffer[(x * 2)] = (uint8_t)(color >> 8);
-        lineBuffer[(x * 2) + 1] = (uint8_t)(color & 0xFF);
-    }
-
-    tftSpi->beginTransaction(SPISettings(TFT_SPI_HZ, MSBFIRST, SPI_MODE0));
-    digitalWrite(TFT_CS, LOW);
-
-    uint16_t x0 = TFT_X_OFFSET;
-    uint16_t x1 = TFT_X_OFFSET + TFT_WIDTH - 1;
-    uint16_t y0 = TFT_Y_OFFSET;
-    uint16_t y1 = TFT_Y_OFFSET + TFT_HEIGHT - 1;
-
-    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2A);
-    digitalWrite(TFT_DC, HIGH);
-    tftSpi->transfer((uint8_t)(x0 >> 8));
-    tftSpi->transfer((uint8_t)(x0 & 0xFF));
-    tftSpi->transfer((uint8_t)(x1 >> 8));
-    tftSpi->transfer((uint8_t)(x1 & 0xFF));
-
-    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2B);
-    digitalWrite(TFT_DC, HIGH);
-    tftSpi->transfer((uint8_t)(y0 >> 8));
-    tftSpi->transfer((uint8_t)(y0 & 0xFF));
-    tftSpi->transfer((uint8_t)(y1 >> 8));
-    tftSpi->transfer((uint8_t)(y1 & 0xFF));
-
-    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2C);
-    digitalWrite(TFT_DC, HIGH);
-
-    for (int y = 0; y < TFT_HEIGHT; y++) {
-        tftSpi->writeBytes(lineBuffer, (uint32_t)sizeof(lineBuffer));
-    }
-
-    digitalWrite(TFT_CS, HIGH);
-    tftSpi->endTransaction();
-
+    if (!displayReady) return;
+    if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(40)) != pdTRUE) return;
+    tft.fillRect(TFT_X_OFFSET, TFT_Y_OFFSET, TFT_WIDTH, TFT_HEIGHT, color);
     if (tftMutex) xSemaphoreGive(tftMutex);
 }
 
 void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height) {
-    if (!tftSpi || !displayReady || !frameData) return;
+    if (!displayReady || !frameData) return;
     if (width != TFT_WIDTH || height != TFT_HEIGHT) return;
     if (tftMutex && xSemaphoreTake(tftMutex, pdMS_TO_TICKS(40)) != pdTRUE) return;
-
-    tftSpi->beginTransaction(SPISettings(TFT_SPI_HZ, MSBFIRST, SPI_MODE0));
-    digitalWrite(TFT_CS, LOW);
-
-    uint16_t x0 = TFT_X_OFFSET;
-    uint16_t x1 = TFT_X_OFFSET + width - 1;
-    uint16_t y0 = TFT_Y_OFFSET;
-    uint16_t y1 = TFT_Y_OFFSET + height - 1;
-
-    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2A);
-    digitalWrite(TFT_DC, HIGH);
-    tftSpi->transfer((uint8_t)(x0 >> 8));
-    tftSpi->transfer((uint8_t)(x0 & 0xFF));
-    tftSpi->transfer((uint8_t)(x1 >> 8));
-    tftSpi->transfer((uint8_t)(x1 & 0xFF));
-
-    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2B);
-    digitalWrite(TFT_DC, HIGH);
-    tftSpi->transfer((uint8_t)(y0 >> 8));
-    tftSpi->transfer((uint8_t)(y0 & 0xFF));
-    tftSpi->transfer((uint8_t)(y1 >> 8));
-    tftSpi->transfer((uint8_t)(y1 & 0xFF));
-
-    digitalWrite(TFT_DC, LOW); tftSpi->transfer(0x2C);
-    digitalWrite(TFT_DC, HIGH);
-
-    size_t totalBytes = (size_t)width * (size_t)height * 2U;
-    const uint8_t *ptr = frameData;
-    while (totalBytes > 0) {
-        uint32_t chunk = (totalBytes > 4096U) ? 4096U : (uint32_t)totalBytes;
-        tftSpi->writeBytes(ptr, chunk);
-        ptr += chunk;
-        totalBytes -= chunk;
-    }
-
-    digitalWrite(TFT_CS, HIGH);
-    tftSpi->endTransaction();
-
+    tft.pushImage(TFT_X_OFFSET, TFT_Y_OFFSET, width, height, reinterpret_cast<const uint16_t*>(frameData));
     if (tftMutex) xSemaphoreGive(tftMutex);
 }
 
 bool initSt7789Panel() {
-    if (!tftSpi) return false;
-
-    digitalWrite(TFT_RST, LOW);
-    delay(20);
-    digitalWrite(TFT_RST, HIGH);
-    delay(120);
-
-    st7789WriteCommand(0x01, NULL, 0); // SWRESET
-    delay(120);
-    st7789WriteCommand(0x11, NULL, 0); // SLPOUT
-    delay(120);
-
-    uint8_t colmod = 0x55; // RGB565
-    st7789WriteCommand(0x3A, &colmod, 1);
-
-    uint8_t madctl = 0x00;
-    st7789WriteCommand(0x36, &madctl, 1);
-
-    uint8_t porch[5] = {0x0C, 0x0C, 0x00, 0x33, 0x33};
-    st7789WriteCommand(0xB2, porch, sizeof(porch));
-
-    uint8_t gate = 0x35;
-    st7789WriteCommand(0xB7, &gate, 1);
-
-    uint8_t vcom = 0x19;
-    st7789WriteCommand(0xBB, &vcom, 1);
-
-    uint8_t lcm = 0x2C;
-    st7789WriteCommand(0xC0, &lcm, 1);
-
-    uint8_t vdvVrh[2] = {0x01, 0xFF};
-    st7789WriteCommand(0xC2, vdvVrh, sizeof(vdvVrh));
-
-    uint8_t vrhs = 0x12;
-    st7789WriteCommand(0xC3, &vrhs, 1);
-
-    uint8_t vdvs = 0x20;
-    st7789WriteCommand(0xC4, &vdvs, 1);
-
-    uint8_t frctrl2 = 0x0F;
-    st7789WriteCommand(0xC6, &frctrl2, 1);
-
-    uint8_t pwctrl1 = 0xA4;
-    st7789WriteCommand(0xD0, &pwctrl1, 1);
-
-    st7789WriteCommand(0x21, NULL, 0); // INVON
-    st7789WriteCommand(0x13, NULL, 0); // NORON
-    st7789WriteCommand(0x29, NULL, 0); // DISPON
-    delay(20);
-
+    tft.init();
+    tft.setRotation(0);
+    tft.setSwapBytes(true);
+    TJpg_Decoder.setSwapBytes(false);
+    TJpg_Decoder.setJpgScale(1);
+    TJpg_Decoder.setCallback(_tjpgDecodeToBuffer);
+    tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
     return true;
 }
@@ -1702,91 +1538,110 @@ void _closeRawFrameStream() {
     }
 }
 
-static esp_jpeg_image_scale_t _selectJpegScale(uint16_t width, uint16_t height) {
+static uint8_t _selectJpgScale(uint16_t width, uint16_t height) {
     size_t maxPixels = videoMjpegDecodeBufferSize / 2U;
     if (maxPixels == 0) {
-        return JPEG_IMAGE_SCALE_1_8;
+        return 8;
     }
 
-    for (int s = 0; s <= 3; s++) {
-        uint16_t scaledW = width;
-        uint16_t scaledH = height;
-        for (int i = 0; i < s; i++) {
-            scaledW = (uint16_t)((scaledW + 1U) / 2U);
-            scaledH = (uint16_t)((scaledH + 1U) / 2U);
-        }
-        size_t pixels = (size_t)scaledW * (size_t)scaledH;
-        if (pixels <= maxPixels) {
-            return (esp_jpeg_image_scale_t)s;
-        }
+    size_t pixels = (size_t)width * (size_t)height;
+    if (pixels <= maxPixels) {
+        return 1;
+    }
+    if (((size_t)((width + 1U) / 2U) * (size_t)((height + 1U) / 2U)) <= maxPixels) {
+        return 2;
+    }
+    if (((size_t)((width + 3U) / 4U) * (size_t)((height + 3U) / 4U)) <= maxPixels) {
+        return 4;
+    }
+    return 8;
+}
+
+static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
+    if (!tjpgDecodeTarget || !bitmap) return false;
+    if (x < 0 || y < 0) return false;
+    if (x >= (int16_t)tjpgDecodeWidth || y >= (int16_t)tjpgDecodeHeight) return false;
+
+    uint16_t copyW = w;
+    uint16_t copyH = h;
+    if ((uint32_t)x + copyW > tjpgDecodeWidth) {
+        copyW = (uint16_t)(tjpgDecodeWidth - x);
+    }
+    if ((uint32_t)y + copyH > tjpgDecodeHeight) {
+        copyH = (uint16_t)(tjpgDecodeHeight - y);
     }
 
-    return JPEG_IMAGE_SCALE_1_8;
+    for (uint16_t row = 0; row < copyH; row++) {
+        uint16_t *dest = tjpgDecodeTarget + (size_t)(y + row) * tjpgDecodeWidth + (size_t)x;
+        const uint16_t *src = bitmap + (size_t)row * w;
+        memcpy(dest, src, (size_t)copyW * sizeof(uint16_t));
+    }
+    return true;
 }
 
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
     if (!jpegData || jpegSize < 4 || frameIndex >= VIDEO_FRAME_BUFFER_COUNT) return false;
-    if (!videoFrameBuffers[frameIndex] || !videoMjpegDecodeBuffer) return false;
+    if (!videoFrameBuffers[frameIndex]) return false;
 
-    esp_jpeg_image_cfg_t probeCfg = {};
-    probeCfg.indata = (uint8_t*)jpegData;
-    probeCfg.indata_size = jpegSize;
-    probeCfg.out_format = JPEG_IMAGE_FORMAT_RGB565;
-    probeCfg.out_scale = JPEG_IMAGE_SCALE_0;
-
-    esp_jpeg_image_output_t probeOut = {};
-    if (esp_jpeg_get_image_info(&probeCfg, &probeOut) != ESP_OK || probeOut.width == 0 || probeOut.height == 0) {
+    uint16_t jpegWidth = 0;
+    uint16_t jpegHeight = 0;
+    if (!TJpg_Decoder.getJpgSize(&jpegWidth, &jpegHeight, jpegData, jpegSize) || jpegWidth == 0 || jpegHeight == 0) {
         return false;
     }
 
-    esp_jpeg_image_scale_t scale = _selectJpegScale(probeOut.width, probeOut.height);
+    uint8_t scale = _selectJpgScale(jpegWidth, jpegHeight);
+    TJpg_Decoder.setJpgScale(scale);
+
+    uint16_t scaledWidth = (uint16_t)((jpegWidth + scale - 1U) / scale);
+    uint16_t scaledHeight = (uint16_t)((jpegHeight + scale - 1U) / scale);
+    if (scaledWidth == 0 || scaledHeight == 0) {
+        return false;
+    }
+
     const bool rotateCw = (MJPEG_ROTATE_90_CW != 0);
     const bool rotateCcw = (MJPEG_ROTATE_90_CCW != 0);
     const bool needsRotate = rotateCw || rotateCcw;
     const bool needsTransform = needsRotate || MJPEG_FLIP_X || MJPEG_FLIP_Y;
 
+    uint8_t *decodeTarget = videoMjpegDecodeBuffer;
+    size_t decodeTargetCapacity = videoMjpegDecodeBufferSize;
     if (displayNative && !needsTransform) {
-        if (probeOut.width != TFT_WIDTH || probeOut.height != TFT_HEIGHT) {
+        if (scaledWidth != TFT_WIDTH || scaledHeight != TFT_HEIGHT) {
             return false;
         }
-
-        esp_jpeg_image_cfg_t nativeCfg = {};
-        nativeCfg.indata = (uint8_t*)jpegData;
-        nativeCfg.indata_size = jpegSize;
-        nativeCfg.outbuf = videoFrameBuffers[frameIndex];
-        nativeCfg.outbuf_size = videoRawFrameSize;
-        nativeCfg.out_format = JPEG_IMAGE_FORMAT_RGB565;
-        nativeCfg.out_scale = JPEG_IMAGE_SCALE_0;
-        nativeCfg.flags.swap_color_bytes = MJPEG_SWAP_RGB565_BYTES;
-
-        esp_jpeg_image_output_t nativeOut = {};
-        return esp_jpeg_decode(&nativeCfg, &nativeOut) == ESP_OK &&
-               nativeOut.width == TFT_WIDTH &&
-               nativeOut.height == TFT_HEIGHT;
+        decodeTarget = videoFrameBuffers[frameIndex];
+        decodeTargetCapacity = videoRawFrameSize;
     }
 
-    esp_jpeg_image_cfg_t decodeCfg = {};
-    decodeCfg.indata = (uint8_t*)jpegData;
-    decodeCfg.indata_size = jpegSize;
-    decodeCfg.outbuf = videoMjpegDecodeBuffer;
-    decodeCfg.outbuf_size = videoMjpegDecodeBufferSize;
-    decodeCfg.out_format = JPEG_IMAGE_FORMAT_RGB565;
-    decodeCfg.out_scale = scale;
-    decodeCfg.flags.swap_color_bytes = 0;
-
-    esp_jpeg_image_output_t decodeOut = {};
-    if (esp_jpeg_decode(&decodeCfg, &decodeOut) != ESP_OK || decodeOut.width == 0 || decodeOut.height == 0) {
+    size_t requiredBytes = (size_t)scaledWidth * (size_t)scaledHeight * 2U;
+    if (!decodeTarget || requiredBytes > decodeTargetCapacity) {
         return false;
     }
 
-    uint8_t *target = videoFrameBuffers[frameIndex];
-    memset(target, 0x00, videoRawFrameSize);
+    tjpgDecodeTarget = reinterpret_cast<uint16_t*>(decodeTarget);
+    tjpgDecodeWidth = scaledWidth;
+    tjpgDecodeHeight = scaledHeight;
+    memset(decodeTarget, 0x00, requiredBytes);
 
-    uint16_t drawWidth = decodeOut.width;
-    uint16_t drawHeight = decodeOut.height;
+    bool decodeOk = TJpg_Decoder.drawJpg(0, 0, jpegData, jpegSize);
+    tjpgDecodeTarget = NULL;
+    if (!decodeOk) {
+        return false;
+    }
+
+    if (displayNative && !needsTransform) {
+        return true;
+    }
+
+    uint16_t *sourcePixels = reinterpret_cast<uint16_t*>(videoMjpegDecodeBuffer);
+    uint16_t *targetPixels = reinterpret_cast<uint16_t*>(videoFrameBuffers[frameIndex]);
+    memset(targetPixels, 0x00, videoRawFrameSize);
+
+    uint16_t drawWidth = scaledWidth;
+    uint16_t drawHeight = scaledHeight;
     if (needsRotate) {
-        drawWidth = decodeOut.height;
-        drawHeight = decodeOut.width;
+        drawWidth = scaledHeight;
+        drawHeight = scaledWidth;
     }
 
     uint16_t dstX = 0;
@@ -1834,9 +1689,9 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
 
             if (rotateCw) {
                 srcX = ty;
-                srcY = (uint16_t)(decodeOut.height - 1U - tx);
+                srcY = (uint16_t)(scaledHeight - 1U - tx);
             } else if (rotateCcw) {
-                srcX = (uint16_t)(decodeOut.width - 1U - ty);
+                srcX = (uint16_t)(scaledWidth - 1U - ty);
                 srcY = tx;
             } else {
                 srcX = tx;
@@ -1844,29 +1699,19 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
             }
 
             if (MJPEG_FLIP_X) {
-                srcX = (uint16_t)(decodeOut.width - 1U - srcX);
+                srcX = (uint16_t)(scaledWidth - 1U - srcX);
             }
             if (MJPEG_FLIP_Y) {
-                srcY = (uint16_t)(decodeOut.height - 1U - srcY);
+                srcY = (uint16_t)(scaledHeight - 1U - srcY);
             }
 
             // Defensive guard: rotation math should keep coordinates in range.
-            if (srcX >= decodeOut.width || srcY >= decodeOut.height) {
+            if (srcX >= scaledWidth || srcY >= scaledHeight) {
                 continue;
             }
 
-            size_t srcIndex = ((size_t)srcY * (size_t)decodeOut.width + (size_t)srcX) * 2U;
-            uint8_t lo = videoMjpegDecodeBuffer[srcIndex];
-            uint8_t hi = videoMjpegDecodeBuffer[srcIndex + 1U];
-
-            size_t dstIndex = ((size_t)(dstY + y) * (size_t)TFT_WIDTH + (size_t)(dstX + x)) * 2U;
-            if (MJPEG_SWAP_RGB565_BYTES) {
-                target[dstIndex] = hi;
-                target[dstIndex + 1U] = lo;
-            } else {
-                target[dstIndex] = lo;
-                target[dstIndex + 1U] = hi;
-            }
+            uint16_t color = sourcePixels[(size_t)srcY * scaledWidth + (size_t)srcX];
+            targetPixels[(size_t)(dstY + y) * TFT_WIDTH + (size_t)(dstX + x)] = color;
         }
     }
 
