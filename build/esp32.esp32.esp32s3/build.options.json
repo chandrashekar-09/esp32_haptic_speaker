@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "../../..,../../..,../..,../..,../..",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:esp32s3:JTAGAdapter=default,PSRAM=opi,FlashMode=qio,FlashSize=16M,LoopCore=1,EventsCore=1,USBMode=hwcdc,CDCOnBoot=default,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,PartitionScheme=app3M_fat9M_16MB,CPUFreq=240,UploadSpeed=921600,DebugLevel=none,EraseFlash=none,ZigbeeMode=default",
+  "hardwareFolders": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7,/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7",
+  "otherLibrariesFolders": "/home/chandrashekar/Arduino/libraries",
+  "sketchLocation": "/home/chandrashekar/Arduino/esp32_haptic"
+}

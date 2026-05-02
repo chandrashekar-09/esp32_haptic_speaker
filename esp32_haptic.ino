@@ -114,45 +114,75 @@ struct VideoPacket {
 };
 
 QueueHandle_t videoDisplayQueue = NULL;
+QueueHandle_t videoFreeFrameQueue = NULL;
 volatile bool videoPipelineActive = false;
 volatile bool displayReady = false;
-volatile uint32_t videoTargetFps = 15;
+volatile uint32_t videoTargetFps = 12;
 volatile uint32_t videoFramesDecoded = 0;
 volatile uint32_t videoFramesDisplayed = 0;
 volatile uint32_t videoFramesDropped = 0;
+volatile uint32_t videoFramesSkipped = 0;
 volatile int32_t videoAvDriftMs = 0;
 volatile uint32_t videoStartMs = 0;
 volatile bool videoUseFileStream = false;
 volatile bool videoUseRawFrameStream = false;
 volatile bool videoUseMjpegStream = false;
+volatile bool videoUseHmjStream = false;
 volatile bool videoStreamEof = false;
+volatile uint32_t videoFrameCount = 0;
+volatile uint32_t videoLastFramePtsMs = 0;
+volatile uint32_t videoLastAudioClockMs = 0;
+volatile uint32_t videoDecodeLastMs = 0;
+volatile uint32_t videoDecodeAvgMs = 0;
+volatile uint32_t videoDecodeMaxMs = 0;
+volatile uint32_t videoDrawLastMs = 0;
+volatile uint32_t videoDrawAvgMs = 0;
+volatile uint32_t videoDrawMaxMs = 0;
 uint32_t videoStreamHeaderSize = 0;
 
 File videoStreamFile;
 File videoRawFile;
 File videoMjpegFile;
+File videoHmjFile;
 uint32_t videoRawHeaderSize = 0;
 uint16_t videoRawWidth = TFT_WIDTH;
 uint16_t videoRawHeight = TFT_HEIGHT;
-uint16_t videoRawFps = 15;
+uint16_t videoRawFps = 12;
 size_t videoRawFrameSize = 0;
-uint8_t *videoFrameBuffers[2] = {NULL, NULL};
+#define VIDEO_FRAME_BUFFER_COUNT 3
+uint8_t *videoFrameBuffers[VIDEO_FRAME_BUFFER_COUNT] = {NULL, NULL, NULL};
 uint8_t *videoMjpegFrameData = NULL;
 size_t videoMjpegFrameCapacity = 0;
 uint8_t *videoMjpegDecodeBuffer = NULL;
 size_t videoMjpegDecodeBufferSize = 0;
 volatile bool videoMjpegLastReadEof = false;
+volatile bool videoHmjLastReadEof = false;
+uint16_t videoHmjWidth = TFT_WIDTH;
+uint16_t videoHmjHeight = TFT_HEIGHT;
+uint16_t videoHmjFps = 12;
+uint32_t videoHmjFrameCount = 0;
+uint32_t videoHmjCurrentFrame = 0;
+uint32_t videoHmjHeaderSize = 0;
 
 #define MJPEG_MAX_FRAME_BYTES (300U * 1024U)
 #define MJPEG_DECODE_MAX_PIXELS (320U * 320U)
 #define MJPEG_READ_CHUNK_BYTES 8192
 #define MJPEG_DEFAULT_FPS 12
+#define HMJ_HEADER_BYTES 16
+#define HMJ_FRAME_HEADER_BYTES 8
+#define HMJ_MAGIC_0 'H'
+#define HMJ_MAGIC_1 'M'
+#define HMJ_MAGIC_2 'J'
+#define HMJ_MAGIC_3 '1'
 #define RGB_RAW_FIXED_FPS 15
 #define MJPEG_SWAP_RGB565_BYTES 1
 #define MJPEG_FLIP_X 0
 #define MJPEG_FLIP_Y 0
-#define MJPEG_ROTATE_90_CW 1
+#define MJPEG_ROTATE_90_CW 1                                                                                                                        
 #define MJPEG_FILL_SCREEN_CROP 1
+#define MJPEG_AUDIO_MAX_SKIP_FRAMES 30
+#define MJPEG_DISPLAY_DROP_LAG_MS 200
+#define AUDIO_CLOCK_MAX_STEP_MS 50
 #define VIDEO_LAG_SKIP_THRESHOLD_MS 120
 #define VIDEO_LAG_CRITICAL_MS 260
 
@@ -164,6 +194,10 @@ volatile bool videoSdReadInProgress = false;
 uint8_t *videoCompanionMp3Data = NULL;
 size_t videoCompanionMp3Size = 0;
 volatile bool videoCompanionInRam = false;
+uint32_t videoAudioClockMs = 0;
+uint32_t videoAudioClockLastWallMs = 0;
+bool videoAudioClockValid = false;
+uint32_t videoSyncLogLastMs = 0;
 
 #define VIDEO_COMPANION_MP3_MAX_BYTES (5U * 1024U * 1024U)
 
@@ -183,6 +217,7 @@ static const BaseType_t CORE_SERVICE = 0;
 static const UBaseType_t PRIO_WEB = 1;
 static const UBaseType_t PRIO_LED = 2;
 static const UBaseType_t PRIO_VIDEO = 5;
+static const UBaseType_t PRIO_DISPLAY = 6;
 static const UBaseType_t PRIO_AUDIO = 4;
 static const TickType_t WEB_DELAY_NORMAL = pdMS_TO_TICKS(10);
 static const TickType_t WEB_DELAY_VIDEO = pdMS_TO_TICKS(30);
@@ -200,6 +235,8 @@ class AudioOutputHaptic : public AudioOutput {
 private:
     int _bclk, _lrc, _dout;
     int _sampleRate = 44100;
+    uint16_t _dmaDescNum = 12;
+    uint16_t _dmaFrameNum = 1000;
     i2s_chan_handle_t tx_chan; // IDF v5 channel handle
     volatile uint64_t _framesRendered = 0;
 public:
@@ -237,13 +274,18 @@ public:
         if (_sampleRate <= 0) return 0;
         return (uint32_t)((_framesRendered * 1000ULL) / (uint64_t)_sampleRate);
     }
+    uint32_t bufferedMs() const {
+        if (_sampleRate <= 0) return 0;
+        uint64_t frames = (uint64_t)_dmaDescNum * (uint64_t)_dmaFrameNum;
+        return (uint32_t)((frames * 1000ULL) / (uint64_t)_sampleRate);
+    }
 
     virtual bool begin() override {
         // 1. Allocate an I2S TX channel (IDF v5)
         i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
         chan_cfg.auto_clear = true; // Auto clear TX buffer
-        chan_cfg.dma_desc_num = 12;    // Deep buffer for dropout prevention
-        chan_cfg.dma_frame_num = 1000; // ~270ms of audio buffer
+        chan_cfg.dma_desc_num = _dmaDescNum;    // Deep buffer for dropout prevention
+        chan_cfg.dma_frame_num = _dmaFrameNum;  // ~270ms of audio buffer
         esp_err_t err = i2s_new_channel(&chan_cfg, &tx_chan, NULL);
         if (err != ESP_OK) {
             Serial.println("I2S channel allocation failed");
@@ -391,6 +433,12 @@ bool _readMjpegFrameBytes(size_t *outFrameLen);
 bool _readMjpegFrameToBuffer(uint8_t frameIndex);
 bool _skipMjpegFrames(uint32_t frameCount);
 void _closeMjpegStream();
+bool _openHmjStream(const String& filename);
+bool _readHmjFrameHeader(uint32_t *outPtsMs, uint32_t *outJpegLen);
+bool _readHmjFramePayloadToBuffer(uint32_t jpegLen, uint8_t frameIndex);
+bool _skipHmjFramePayload(uint32_t jpegLen);
+bool _rewindHmjStream();
+void _closeHmjStream();
 void _stopAudioDecoderOnly();
 void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequested);
 void updateAudioVolumeAndBalance();
@@ -398,6 +446,10 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
 bool _seekAudioToSeconds(uint32_t positionSec);
 bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs = 50);
 uint32_t _videoPlaybackClockMs();
+bool _acquireVideoFrameBuffer(uint8_t *frameIndex, TickType_t waitTicks);
+void _releaseVideoFrameBuffer(uint8_t frameIndex);
+void _resetVideoFrameQueues();
+bool _queueVideoPacket(VideoPacket &packet);
 void _videoSdReadBegin();
 void _videoSdReadEnd();
 void _releaseCompanionAudioRam();
@@ -438,10 +490,13 @@ void _stopAudioSafely() {
     _closeVideoColorStream();
     _closeRawFrameStream();
     _closeMjpegStream();
+    _closeHmjStream();
     videoUseFileStream = false;
     videoUseRawFrameStream = false;
     videoUseMjpegStream = false;
+    videoUseHmjStream = false;
     videoStreamEof = false;
+    videoFrameCount = 0;
 
     if (sdMutex) {
         xSemaphoreGive(sdMutex);
@@ -463,6 +518,7 @@ void _stopAudioSafely() {
         activeSessionId = 0;
     }
     videoStart_state = VIDEO_START_IDLE;
+    _resetVideoFrameQueues();
     isPaused = false;
 }
 
@@ -504,6 +560,9 @@ void _releaseCompanionAudioRam() {
     }
     videoCompanionMp3Size = 0;
     videoCompanionInRam = false;
+    videoAudioClockMs = 0;
+    videoAudioClockLastWallMs = 0;
+    videoAudioClockValid = false;
 }
 
 bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize) {
@@ -745,17 +804,102 @@ bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs) {
 
 uint32_t _videoPlaybackClockMs() {
     if (videoCompanionAudioActive) {
+        uint32_t now = millis();
         if (out) {
             uint32_t audioMs = out->clockMs();
-            if (audioMs > 0) {
-                return audioMs;
+            uint32_t latencyMs = out->bufferedMs();
+            uint32_t adjustedMs = (audioMs > latencyMs) ? (audioMs - latencyMs) : 0;
+            if (adjustedMs > 0) {
+                if (!videoAudioClockValid || adjustedMs >= videoAudioClockMs) {
+                    videoAudioClockMs = adjustedMs;
+                }
+                videoAudioClockLastWallMs = now;
+                videoAudioClockValid = true;
+                return videoAudioClockMs;
             }
         }
+        if (videoAudioClockValid) {
+            uint32_t delta = now - videoAudioClockLastWallMs;
+            if (delta > AUDIO_CLOCK_MAX_STEP_MS) delta = AUDIO_CLOCK_MAX_STEP_MS;
+            videoAudioClockLastWallMs = now;
+            videoAudioClockMs += delta;
+            return videoAudioClockMs;
+        }
         if (videoCompanionAudioStartMs != 0) {
-            return millis() - videoCompanionAudioStartMs;
+            return now - videoCompanionAudioStartMs;
         }
     }
     return millis() - videoStartMs;
+}
+
+static uint16_t _readLe16(const uint8_t *p) {
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t _readLe32(const uint8_t *p) {
+    return (uint32_t)p[0] |
+           ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static bool _readFileExact(File &file, uint8_t *buffer, size_t len) {
+    size_t offset = 0;
+    while (offset < len) {
+        int n = file.read(buffer + offset, len - offset);
+        if (n <= 0) {
+            return false;
+        }
+        offset += (size_t)n;
+    }
+    return true;
+}
+
+static void _recordMovingAverage(volatile uint32_t &lastMs, volatile uint32_t &avgMs, volatile uint32_t &maxMs, uint32_t sampleMs) {
+    lastMs = sampleMs;
+    if (sampleMs > maxMs) {
+        maxMs = sampleMs;
+    }
+    avgMs = (avgMs == 0) ? sampleMs : ((avgMs * 7U) + sampleMs) / 8U;
+}
+
+static bool _packetUsesFrameBuffer(const VideoPacket &packet) {
+    return (packet.frameIndex < VIDEO_FRAME_BUFFER_COUNT) && videoFrameBuffers[packet.frameIndex] &&
+           (videoUseRawFrameStream || videoUseMjpegStream || videoUseHmjStream);
+}
+
+bool _acquireVideoFrameBuffer(uint8_t *frameIndex, TickType_t waitTicks) {
+    if (!frameIndex || !videoFreeFrameQueue) return false;
+    return xQueueReceive(videoFreeFrameQueue, frameIndex, waitTicks) == pdTRUE;
+}
+
+void _releaseVideoFrameBuffer(uint8_t frameIndex) {
+    if (!videoFreeFrameQueue || frameIndex >= VIDEO_FRAME_BUFFER_COUNT || !videoFrameBuffers[frameIndex]) return;
+    xQueueSend(videoFreeFrameQueue, &frameIndex, 0);
+}
+
+void _resetVideoFrameQueues() {
+    if (videoDisplayQueue) {
+        xQueueReset(videoDisplayQueue);
+    }
+    if (!videoFreeFrameQueue) return;
+    xQueueReset(videoFreeFrameQueue);
+    for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
+        if (videoFrameBuffers[i]) {
+            xQueueSend(videoFreeFrameQueue, &i, 0);
+        }
+    }
+}
+
+bool _queueVideoPacket(VideoPacket &packet) {
+    if (videoDisplayQueue && xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
+        return true;
+    }
+    if (_packetUsesFrameBuffer(packet)) {
+        _releaseVideoFrameBuffer(packet.frameIndex);
+    }
+    videoFramesDropped++;
+    return false;
 }
 
 void _videoSdReadBegin() {
@@ -953,13 +1097,20 @@ void initDisplayVideoScaffold() {
     }
 
     videoRawFrameSize = (size_t)TFT_WIDTH * (size_t)TFT_HEIGHT * 2U;
-    videoFrameBuffers[0] = (uint8_t*)ps_malloc(videoRawFrameSize);
-    videoFrameBuffers[1] = (uint8_t*)ps_malloc(videoRawFrameSize);
-    if (!videoFrameBuffers[0] || !videoFrameBuffers[1]) {
-        if (videoFrameBuffers[0]) free(videoFrameBuffers[0]);
-        if (videoFrameBuffers[1]) free(videoFrameBuffers[1]);
-        videoFrameBuffers[0] = NULL;
-        videoFrameBuffers[1] = NULL;
+    bool frameBuffersOk = true;
+    for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
+        videoFrameBuffers[i] = (uint8_t*)ps_malloc(videoRawFrameSize);
+        if (!videoFrameBuffers[i]) {
+            frameBuffersOk = false;
+        }
+    }
+    if (!frameBuffersOk) {
+        for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
+            if (videoFrameBuffers[i]) {
+                free(videoFrameBuffers[i]);
+                videoFrameBuffers[i] = NULL;
+            }
+        }
         Serial.println("WARN: Raw frame buffers unavailable; .v16 playback disabled.");
     }
 
@@ -977,14 +1128,16 @@ void initDisplayVideoScaffold() {
         Serial.println("WARN: MJPEG buffers unavailable; .mjpg/.mjpeg playback disabled.");
     }
 
-    videoDisplayQueue = xQueueCreate(6, sizeof(VideoPacket));
+    videoDisplayQueue = xQueueCreate(VIDEO_FRAME_BUFFER_COUNT, sizeof(VideoPacket));
+    videoFreeFrameQueue = xQueueCreate(VIDEO_FRAME_BUFFER_COUNT, sizeof(uint8_t));
 
-    if (!videoDisplayQueue) {
+    if (!videoDisplayQueue || !videoFreeFrameQueue) {
         Serial.println("WARN: Video queues allocation failed; video pipeline disabled.");
         videoPipelineActive = false;
         return;
     }
 
+    _resetVideoFrameQueues();
     videoPipelineActive = true;
     if (displayReady) {
         st7789FillColor(0xF800);
@@ -1197,11 +1350,22 @@ bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t se
     videoFramesDecoded = 0;
     videoFramesDisplayed = 0;
     videoFramesDropped = 0;
+    videoFramesSkipped = 0;
     videoAvDriftMs = 0;
+    videoFrameCount = 0;
+    videoLastFramePtsMs = 0;
+    videoLastAudioClockMs = 0;
+    videoDecodeLastMs = 0;
+    videoDecodeAvgMs = 0;
+    videoDecodeMaxMs = 0;
+    videoDrawLastMs = 0;
+    videoDrawAvgMs = 0;
+    videoDrawMaxMs = 0;
     videoStartMs = millis();
     videoUseFileStream = false;
     videoUseRawFrameStream = false;
     videoUseMjpegStream = false;
+    videoUseHmjStream = false;
     videoStreamEof = false;
 
     String lower = filename;
@@ -1210,6 +1374,13 @@ bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t se
         videoUseRawFrameStream = _openRawFrameStream(filename);
         if (!videoUseRawFrameStream) {
             Serial.println("Video raw stream open failed.");
+            videoStart_state = VIDEO_START_FAILED;
+            return false;
+        }
+    } else if (lower.endsWith(".hmj")) {
+        videoUseHmjStream = _openHmjStream(filename);
+        if (!videoUseHmjStream) {
+            Serial.println("Video HMJ stream open failed.");
             videoStart_state = VIDEO_START_FAILED;
             return false;
         }
@@ -1233,15 +1404,17 @@ bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t se
         return false;
     }
 
-    if (videoDisplayQueue) xQueueReset(videoDisplayQueue);
+    _resetVideoFrameQueues();
 
     if (stopRequested || sessionId != mediaSessionId) {
         _closeVideoColorStream();
         _closeRawFrameStream();
         _closeMjpegStream();
+        _closeHmjStream();
         videoUseFileStream = false;
         videoUseRawFrameStream = false;
         videoUseMjpegStream = false;
+        videoUseHmjStream = false;
         videoStart_state = VIDEO_START_FAILED;
         return false;
     }
@@ -1265,6 +1438,7 @@ bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t se
 
     const char* modeStr = "synthetic";
     if (videoUseRawFrameStream) modeStr = "raw-frame";
+    else if (videoUseHmjStream) modeStr = "hmj";
     else if (videoUseMjpegStream) modeStr = "mjpeg";
     else if (videoUseFileStream) modeStr = "color-stream";
     Serial.printf("Video playback started (%s).\n", modeStr);
@@ -1404,7 +1578,7 @@ bool _openRawFrameStream(const String& filename) {
 }
 
 bool _readRawFrameToBuffer(uint8_t frameIndex) {
-    if (!sdMutex || frameIndex > 1 || !videoFrameBuffers[frameIndex]) return false;
+    if (!sdMutex || frameIndex >= VIDEO_FRAME_BUFFER_COUNT || !videoFrameBuffers[frameIndex]) return false;
     _videoSdReadBegin();
     if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(150))) {
         _videoSdReadEnd();
@@ -1479,8 +1653,8 @@ static esp_jpeg_image_scale_t _selectJpegScale(uint16_t width, uint16_t height) 
     return JPEG_IMAGE_SCALE_1_8;
 }
 
-static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex) {
-    if (!jpegData || jpegSize < 4 || frameIndex > 1) return false;
+static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
+    if (!jpegData || jpegSize < 4 || frameIndex >= VIDEO_FRAME_BUFFER_COUNT) return false;
     if (!videoFrameBuffers[frameIndex] || !videoMjpegDecodeBuffer) return false;
 
     esp_jpeg_image_cfg_t probeCfg = {};
@@ -1495,6 +1669,26 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
     }
 
     esp_jpeg_image_scale_t scale = _selectJpegScale(probeOut.width, probeOut.height);
+
+    if (displayNative) {
+        if (probeOut.width != TFT_WIDTH || probeOut.height != TFT_HEIGHT) {
+            return false;
+        }
+
+        esp_jpeg_image_cfg_t nativeCfg = {};
+        nativeCfg.indata = (uint8_t*)jpegData;
+        nativeCfg.indata_size = jpegSize;
+        nativeCfg.outbuf = videoFrameBuffers[frameIndex];
+        nativeCfg.outbuf_size = videoRawFrameSize;
+        nativeCfg.out_format = JPEG_IMAGE_FORMAT_RGB565;
+        nativeCfg.out_scale = JPEG_IMAGE_SCALE_0;
+        nativeCfg.flags.swap_color_bytes = MJPEG_SWAP_RGB565_BYTES;
+
+        esp_jpeg_image_output_t nativeOut = {};
+        return esp_jpeg_decode(&nativeCfg, &nativeOut) == ESP_OK &&
+               nativeOut.width == TFT_WIDTH &&
+               nativeOut.height == TFT_HEIGHT;
+    }
 
     esp_jpeg_image_cfg_t decodeCfg = {};
     decodeCfg.indata = (uint8_t*)jpegData;
@@ -1620,7 +1814,7 @@ bool _openMjpegStream(const String& filename) {
 }
 
 bool _readMjpegFrameToBuffer(uint8_t frameIndex) {
-    if (!sdMutex || !videoMjpegFile || frameIndex > 1) return false;
+    if (!sdMutex || !videoMjpegFile || frameIndex >= VIDEO_FRAME_BUFFER_COUNT) return false;
     if (!videoMjpegFrameData || videoMjpegFrameCapacity == 0) return false;
 
     size_t frameLen = 0;
@@ -1690,6 +1884,11 @@ bool _readMjpegFrameBytes(size_t *outFrameLen) {
 
                 if (prev == 0xFF && b == 0xD9) {
                     foundEoi = true;
+                    int unreadBytes = readLen - i - 1;
+                    if (unreadBytes > 0) {
+                        uint32_t curPos = videoMjpegFile.position();
+                        videoMjpegFile.seek(curPos - (uint32_t)unreadBytes, SeekSet);
+                    }
                     break;
                 }
             }
@@ -1728,10 +1927,182 @@ void _closeMjpegStream() {
     videoMjpegLastReadEof = false;
 }
 
+bool _openHmjStream(const String& filename) {
+    if (!sdMutex || !videoFrameBuffers[0] || !videoFrameBuffers[1]) return false;
+    if (!videoMjpegFrameData || !videoMjpegDecodeBuffer || videoMjpegFrameCapacity == 0) return false;
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300))) return false;
+
+    bool ok = false;
+    do {
+        if (videoHmjFile) {
+            videoHmjFile.close();
+        }
+
+        videoHmjFile = SD_MMC.open(filename, FILE_READ);
+        if (!videoHmjFile) break;
+
+        uint8_t header[HMJ_HEADER_BYTES] = {0};
+        if (!_readFileExact(videoHmjFile, header, sizeof(header))) {
+            videoHmjFile.close();
+            break;
+        }
+
+        if (header[0] != HMJ_MAGIC_0 || header[1] != HMJ_MAGIC_1 ||
+            header[2] != HMJ_MAGIC_2 || header[3] != HMJ_MAGIC_3) {
+            videoHmjFile.close();
+            break;
+        }
+
+        videoHmjWidth = _readLe16(header + 4);
+        videoHmjHeight = _readLe16(header + 6);
+        videoHmjFps = _readLe16(header + 8);
+        videoHmjFrameCount = _readLe32(header + 12);
+
+        if (videoHmjWidth != TFT_WIDTH || videoHmjHeight != TFT_HEIGHT ||
+            videoHmjFps == 0 || videoHmjFps > 60 || videoHmjFrameCount == 0) {
+            videoHmjFile.close();
+            break;
+        }
+
+        videoTargetFps = videoHmjFps;
+        videoFrameCount = videoHmjFrameCount;
+        videoHmjCurrentFrame = 0;
+        videoHmjHeaderSize = HMJ_HEADER_BYTES;
+        videoHmjLastReadEof = false;
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    return ok;
+}
+
+bool _readHmjFrameHeader(uint32_t *outPtsMs, uint32_t *outJpegLen) {
+    if (!outPtsMs || !outJpegLen) return false;
+    *outPtsMs = 0;
+    *outJpegLen = 0;
+    if (!sdMutex || !videoHmjFile) return false;
+
+    _videoSdReadBegin();
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(80))) {
+        _videoSdReadEnd();
+        return false;
+    }
+
+    bool ok = false;
+    do {
+        if (!videoHmjFile) break;
+        if (videoHmjFrameCount > 0 && videoHmjCurrentFrame >= videoHmjFrameCount) {
+            videoHmjLastReadEof = true;
+            break;
+        }
+
+        uint8_t frameHeader[HMJ_FRAME_HEADER_BYTES] = {0};
+        if (!_readFileExact(videoHmjFile, frameHeader, sizeof(frameHeader))) {
+            videoHmjLastReadEof = true;
+            break;
+        }
+
+        uint32_t ptsMs = _readLe32(frameHeader);
+        uint32_t jpegLen = _readLe32(frameHeader + 4);
+        if (jpegLen < 4 || jpegLen > videoMjpegFrameCapacity) {
+            break;
+        }
+
+        *outPtsMs = ptsMs;
+        *outJpegLen = jpegLen;
+        videoHmjLastReadEof = false;
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
+    return ok;
+}
+
+bool _readHmjFramePayloadToBuffer(uint32_t jpegLen, uint8_t frameIndex) {
+    if (!sdMutex || !videoHmjFile || frameIndex >= VIDEO_FRAME_BUFFER_COUNT) return false;
+    if (!videoMjpegFrameData || jpegLen < 4 || jpegLen > videoMjpegFrameCapacity) return false;
+
+    _videoSdReadBegin();
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(120))) {
+        _videoSdReadEnd();
+        return false;
+    }
+
+    bool ok = false;
+    do {
+        if (!videoHmjFile) break;
+        if (!_readFileExact(videoHmjFile, videoMjpegFrameData, jpegLen)) {
+            videoHmjLastReadEof = true;
+            break;
+        }
+        ok = true;
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
+
+    if (!ok) return false;
+    return _decodeJpegToFrameBuffer(videoMjpegFrameData, jpegLen, frameIndex, true);
+}
+
+bool _skipHmjFramePayload(uint32_t jpegLen) {
+    if (!sdMutex || !videoHmjFile || jpegLen == 0) return false;
+
+    _videoSdReadBegin();
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(80))) {
+        _videoSdReadEnd();
+        return false;
+    }
+
+    bool ok = false;
+    do {
+        if (!videoHmjFile) break;
+        uint64_t curPos = (uint64_t)videoHmjFile.position();
+        uint64_t newPos = curPos + (uint64_t)jpegLen;
+        if (newPos > (uint64_t)videoHmjFile.size()) {
+            videoHmjLastReadEof = true;
+            break;
+        }
+        ok = videoHmjFile.seek((uint32_t)newPos, SeekSet);
+    } while (false);
+
+    xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
+    return ok;
+}
+
+bool _rewindHmjStream() {
+    if (!sdMutex || !videoHmjFile) return false;
+    _videoSdReadBegin();
+    if (!xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100))) {
+        _videoSdReadEnd();
+        return false;
+    }
+    bool ok = videoHmjFile.seek(videoHmjHeaderSize, SeekSet);
+    if (ok) {
+        videoHmjCurrentFrame = 0;
+        videoHmjLastReadEof = false;
+    }
+    xSemaphoreGive(sdMutex);
+    _videoSdReadEnd();
+    return ok;
+}
+
+void _closeHmjStream() {
+    if (videoHmjFile) {
+        videoHmjFile.close();
+    }
+    videoHmjLastReadEof = false;
+    videoHmjCurrentFrame = 0;
+    videoHmjFrameCount = 0;
+}
+
 void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequested) {
     String lower = videoFilename;
     lower.toLowerCase();
-    if (!(lower.endsWith(".mjpg") || lower.endsWith(".mjpeg") || lower.endsWith(".v16") || lower.endsWith(".vid") || lower.endsWith(".rgb"))) {
+    if (!(lower.endsWith(".hmj") || lower.endsWith(".mjpg") || lower.endsWith(".mjpeg") ||
+          lower.endsWith(".v16") || lower.endsWith(".vid") || lower.endsWith(".rgb"))) {
         videoCompanionAudioActive = false;
         videoCompanionAudioLoop = false;
         videoCompanionAudioFile = "";
@@ -1761,6 +2132,9 @@ void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequeste
 
     if (_startAudioPlayback(audioFile, loopRequested, 0, false, activeSessionId)) {
         Serial.printf("Companion audio started: %s\n", audioFile.c_str());
+        videoAudioClockMs = 0;
+        videoAudioClockLastWallMs = millis();
+        videoAudioClockValid = false;
     } else {
         videoCompanionAudioActive = false;
         videoCompanionAudioLoop = false;
@@ -1776,13 +2150,16 @@ void taskVideoDecode(void *pvParameters) {
     uint32_t frameRemainderAcc = 0;
     bool hasPendingPacket = false;
     VideoPacket pendingPacket;
-    uint8_t nextFrameIndex = 0;
+    bool hmjHeaderPending = false;
+    uint32_t hmjPendingPtsMs = 0;
+    uint32_t hmjPendingJpegLen = 0;
 
     while (true) {
         if (!videoPipelineActive || isUploading || currentMediaType != MEDIA_VIDEO) {
             nextFrameAtMs = 0;
             frameRemainderAcc = 0;
             hasPendingPacket = false;
+            hmjHeaderPending = false;
             vTaskDelay(pdMS_TO_TICKS(25));
             continue;
         }
@@ -1800,43 +2177,53 @@ void taskVideoDecode(void *pvParameters) {
             if (videoCompanionAudioActive && framePeriodMs > 0) {
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
                 uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
-                uint32_t expectedPtsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
+                uint32_t sourceFrame = videoFramesDecoded + videoFramesSkipped;
+                uint32_t expectedPtsMs = (uint32_t)(((uint64_t)sourceFrame * 1000ULL) / (uint64_t)fpsNow);
                 int32_t lagMs = (int32_t)playbackClockMs - (int32_t)expectedPtsMs;
                 if (lagMs > VIDEO_LAG_SKIP_THRESHOLD_MS) {
                     uint32_t framesToSkip = (uint32_t)lagMs / framePeriodMs;
                     if (framesToSkip > 0) {
                         if (framesToSkip > 4U) framesToSkip = 4U;
                         if (_skipRawFrames(framesToSkip)) {
-                            videoFramesDecoded += framesToSkip;
-                            videoFramesDropped += framesToSkip;
+                            videoFramesSkipped += framesToSkip;
                         }
                     }
                 }
             }
 
             if ((int32_t)(nowMs - nextFrameAtMs) >= 0) {
-                if (_readRawFrameToBuffer(nextFrameIndex)) {
+                uint8_t frameIndex = 0xFF;
+                if (!_acquireVideoFrameBuffer(&frameIndex, 0)) {
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                    continue;
+                }
+
+                uint32_t decodeStartMs = millis();
+                if (_readRawFrameToBuffer(frameIndex)) {
+                    _recordMovingAverage(videoDecodeLastMs, videoDecodeAvgMs, videoDecodeMaxMs, millis() - decodeStartMs);
                     uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
-                    packet.ptsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
+                    uint32_t sourceFrame = videoFramesDecoded + videoFramesSkipped;
+                    packet.ptsMs = (uint32_t)(((uint64_t)sourceFrame * 1000ULL) / (uint64_t)fpsNow);
                     packet.dataLen = videoFramesDecoded;
                     packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
                     packet.color565 = 0;
-                    packet.frameIndex = nextFrameIndex;
+                    packet.frameIndex = frameIndex;
 
-                    if (xQueueSend(videoDisplayQueue, &packet, 0) != pdTRUE) {
-                        videoFramesDropped++;
-                    }
+                    _queueVideoPacket(packet);
                     videoFramesDecoded++;
-                    nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
                 } else {
+                    _releaseVideoFrameBuffer(frameIndex);
                     videoStreamEof = true;
                     if (loopEnabled && videoRawFile) {
                         if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                                _videoSdReadBegin();
+                            _videoSdReadBegin();
                             videoRawFile.seek(videoRawHeaderSize, SeekSet);
                             xSemaphoreGive(sdMutex);
-                                _videoSdReadEnd();
+                            _videoSdReadEnd();
                             videoStartMs = millis();
+                            videoFramesDecoded = 0;
+                            videoFramesSkipped = 0;
+                            _resetVideoFrameQueues();
                             videoStreamEof = false;
                         }
                     } else {
@@ -1863,53 +2250,146 @@ void taskVideoDecode(void *pvParameters) {
             continue;
         }
 
+        if (videoUseHmjStream) {
+            if (nextFrameAtMs == 0) {
+                nextFrameAtMs = nowMs;
+                frameRemainderAcc = 0;
+            }
+
+            if (!hmjHeaderPending) {
+                uint32_t skippedThisPass = 0;
+                while (true) {
+                    if (!_readHmjFrameHeader(&hmjPendingPtsMs, &hmjPendingJpegLen)) {
+                        videoStreamEof = videoHmjLastReadEof;
+                        if (loopEnabled && videoHmjFile && _rewindHmjStream()) {
+                            videoStartMs = millis();
+                            videoFramesDecoded = 0;
+                            videoFramesSkipped = 0;
+                            _resetVideoFrameQueues();
+                            videoStreamEof = false;
+                            hmjHeaderPending = false;
+                        } else {
+                            _stopAudioSafely();
+                            vTaskDelay(pdMS_TO_TICKS(25));
+                        }
+                        break;
+                    }
+
+                    uint32_t playbackClockMs = videoCompanionAudioActive ? _videoPlaybackClockMs() : (millis() - videoStartMs);
+                    int32_t lateMs = (int32_t)playbackClockMs - (int32_t)hmjPendingPtsMs;
+                    if (videoCompanionAudioActive && lateMs > (int32_t)VIDEO_LAG_SKIP_THRESHOLD_MS &&
+                        skippedThisPass < MJPEG_AUDIO_MAX_SKIP_FRAMES) {
+                        if (_skipHmjFramePayload(hmjPendingJpegLen)) {
+                            videoHmjCurrentFrame++;
+                            videoFramesSkipped++;
+                            skippedThisPass++;
+                            continue;
+                        }
+                        videoFramesDropped++;
+                    }
+
+                    hmjHeaderPending = true;
+                    break;
+                }
+            }
+
+            if (!hmjHeaderPending) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+
+            uint32_t playbackClockMs = videoCompanionAudioActive ? _videoPlaybackClockMs() : (millis() - videoStartMs);
+            if ((int32_t)(playbackClockMs - hmjPendingPtsMs) < 0) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+
+            if (videoDisplayQueue && uxQueueSpacesAvailable(videoDisplayQueue) == 0) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+
+            uint8_t frameIndex = 0xFF;
+            if (!_acquireVideoFrameBuffer(&frameIndex, 0)) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+
+            uint32_t decodeStartMs = millis();
+            if (_readHmjFramePayloadToBuffer(hmjPendingJpegLen, frameIndex)) {
+                _recordMovingAverage(videoDecodeLastMs, videoDecodeAvgMs, videoDecodeMaxMs, millis() - decodeStartMs);
+                packet.ptsMs = hmjPendingPtsMs;
+                packet.dataLen = videoHmjCurrentFrame;
+                packet.keyFrame = ((videoHmjCurrentFrame % 30U) == 0U);
+                packet.color565 = 0;
+                packet.frameIndex = frameIndex;
+                _queueVideoPacket(packet);
+                videoFramesDecoded++;
+                videoHmjCurrentFrame++;
+                hmjHeaderPending = false;
+            } else {
+                _releaseVideoFrameBuffer(frameIndex);
+                videoFramesDropped++;
+                hmjHeaderPending = false;
+                if (videoHmjLastReadEof) {
+                    videoStreamEof = true;
+                }
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
+
         if (videoUseMjpegStream) {
             if (nextFrameAtMs == 0) {
                 nextFrameAtMs = nowMs;
                 frameRemainderAcc = 0;
             }
 
+            uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
             uint32_t framePeriodMs = (videoTargetFps == 0) ? 66 : (1000UL / videoTargetFps);
             uint32_t framePeriodRem = (videoTargetFps == 0) ? 10 : (1000UL % videoTargetFps);
+
             if (videoCompanionAudioActive && framePeriodMs > 0) {
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
-                uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
-                uint32_t expectedPtsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
+                uint32_t sourceFrame = videoFramesDecoded + videoFramesSkipped;
+                uint32_t expectedPtsMs = (uint32_t)(((uint64_t)sourceFrame * 1000ULL) / (uint64_t)fpsNow);
                 int32_t lagMs = (int32_t)playbackClockMs - (int32_t)expectedPtsMs;
                 if (lagMs > VIDEO_LAG_SKIP_THRESHOLD_MS) {
                     uint32_t framesToSkip = (uint32_t)lagMs / framePeriodMs;
-                    if (framesToSkip > 0) {
-                        if (framesToSkip > 3U) framesToSkip = 3U;
-                        if (_skipMjpegFrames(framesToSkip)) {
-                            videoFramesDecoded += framesToSkip;
-                            videoFramesDropped += framesToSkip;
-                        }
+                    if (framesToSkip > MJPEG_AUDIO_MAX_SKIP_FRAMES) framesToSkip = MJPEG_AUDIO_MAX_SKIP_FRAMES;
+                    if (framesToSkip > 0 && _skipMjpegFrames(framesToSkip)) {
+                        videoFramesSkipped += framesToSkip;
                     }
                 }
             }
 
-            if ((int32_t)(nowMs - nextFrameAtMs) >= 0) {
+            bool dueNow = videoCompanionAudioActive || ((int32_t)(nowMs - nextFrameAtMs) >= 0);
+            if (dueNow) {
                 if (videoDisplayQueue && uxQueueSpacesAvailable(videoDisplayQueue) == 0) {
-                    videoFramesDropped++;
-                    nextFrameAtMs = nowMs + framePeriodMs;
                     vTaskDelay(pdMS_TO_TICKS(1));
                     continue;
                 }
 
-                if (_readMjpegFrameToBuffer(nextFrameIndex)) {
-                    uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
-                    packet.ptsMs = (uint32_t)(((uint64_t)videoFramesDecoded * 1000ULL) / (uint64_t)fpsNow);
-                    packet.dataLen = videoFramesDecoded;
-                    packet.keyFrame = ((videoFramesDecoded % 30U) == 0U);
-                    packet.color565 = 0;
-                    packet.frameIndex = nextFrameIndex;
+                uint8_t frameIndex = 0xFF;
+                if (!_acquireVideoFrameBuffer(&frameIndex, 0)) {
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                    continue;
+                }
 
-                    if (xQueueSend(videoDisplayQueue, &packet, 0) != pdTRUE) {
-                        videoFramesDropped++;
-                    }
+                uint32_t decodeStartMs = millis();
+                if (_readMjpegFrameToBuffer(frameIndex)) {
+                    _recordMovingAverage(videoDecodeLastMs, videoDecodeAvgMs, videoDecodeMaxMs, millis() - decodeStartMs);
+                    uint32_t sourceFrame = videoFramesDecoded + videoFramesSkipped;
+                    packet.ptsMs = (uint32_t)(((uint64_t)sourceFrame * 1000ULL) / (uint64_t)fpsNow);
+                    packet.dataLen = sourceFrame;
+                    packet.keyFrame = ((sourceFrame % 30U) == 0U);
+                    packet.color565 = 0;
+                    packet.frameIndex = frameIndex;
+                    _queueVideoPacket(packet);
                     videoFramesDecoded++;
-                    nextFrameIndex = (nextFrameIndex == 0) ? 1 : 0;
                 } else {
+                    _releaseVideoFrameBuffer(frameIndex);
                     if (videoMjpegLastReadEof) {
                         videoStreamEof = true;
                         if (loopEnabled && videoMjpegFile) {
@@ -1919,6 +2399,9 @@ void taskVideoDecode(void *pvParameters) {
                                 xSemaphoreGive(sdMutex);
                                 _videoSdReadEnd();
                                 videoStartMs = millis();
+                                videoFramesDecoded = 0;
+                                videoFramesSkipped = 0;
+                                _resetVideoFrameQueues();
                                 videoStreamEof = false;
                                 videoMjpegLastReadEof = false;
                             }
@@ -1932,19 +2415,27 @@ void taskVideoDecode(void *pvParameters) {
                     }
                 }
 
-                nextFrameAtMs += framePeriodMs;
-                frameRemainderAcc += framePeriodRem;
-                uint32_t fpsNow = (videoTargetFps == 0) ? 15 : videoTargetFps;
-                if (frameRemainderAcc >= fpsNow) {
-                    nextFrameAtMs += 1U;
-                    frameRemainderAcc -= fpsNow;
+                if (!videoCompanionAudioActive) {
+                    nextFrameAtMs += framePeriodMs;
+                    frameRemainderAcc += framePeriodRem;
+                    if (frameRemainderAcc >= fpsNow) {
+                        nextFrameAtMs += 1U;
+                        frameRemainderAcc -= fpsNow;
+                    }
+                    if ((int32_t)(nowMs - nextFrameAtMs) > (int32_t)framePeriodMs) {
+                        nextFrameAtMs = nowMs + framePeriodMs;
+                    }
                 }
+            }
+
+            if ((nowMs - videoSyncLogLastMs) >= 1000U) {
                 uint32_t playbackClockMs = _videoPlaybackClockMs();
-                if (videoCompanionAudioActive && (int32_t)(playbackClockMs - nextFrameAtMs) > (int32_t)VIDEO_LAG_CRITICAL_MS) {
-                    nextFrameAtMs = playbackClockMs;
-                } else if ((int32_t)(nowMs - nextFrameAtMs) > (int32_t)framePeriodMs) {
-                    nextFrameAtMs = nowMs + framePeriodMs;
-                }
+                Serial.printf("AVSync video: audioMs=%u decoded=%u skipped=%u drift=%dms\n",
+                              (uint32_t)playbackClockMs,
+                              (uint32_t)videoFramesDecoded,
+                              (uint32_t)videoFramesSkipped,
+                              (int)videoAvDriftMs);
+                videoSyncLogLastMs = nowMs;
             }
 
             vTaskDelay(pdMS_TO_TICKS(1));
@@ -1962,6 +2453,8 @@ void taskVideoDecode(void *pvParameters) {
                             videoStreamFile.seek(videoStreamHeaderSize, SeekSet);
                             xSemaphoreGive(sdMutex);
                             videoStartMs = millis();
+                            videoFramesDecoded = 0;
+                            videoFramesSkipped = 0;
                             videoStreamEof = false;
                         }
                     } else {
@@ -1975,11 +2468,8 @@ void taskVideoDecode(void *pvParameters) {
             if (hasPendingPacket) {
                 uint32_t elapsedMs = millis() - videoStartMs;
                 if ((int32_t)(elapsedMs - pendingPacket.ptsMs) >= 0) {
-                    if (xQueueSend(videoDisplayQueue, &pendingPacket, 0) == pdTRUE) {
-                        videoFramesDecoded++;
-                    } else {
-                        videoFramesDropped++;
-                    }
+                    _queueVideoPacket(pendingPacket);
+                    videoFramesDecoded++;
                     hasPendingPacket = false;
                 }
             }
@@ -2005,11 +2495,8 @@ void taskVideoDecode(void *pvParameters) {
                                          ((videoFramesDecoded * 7U) & 0x1FU));
             packet.frameIndex = 0;
 
-            if (xQueueSend(videoDisplayQueue, &packet, 0) == pdTRUE) {
-                videoFramesDecoded++;
-            } else {
-                videoFramesDropped++;
-            }
+            _queueVideoPacket(packet);
+            videoFramesDecoded++;
 
             nextFrameAtMs += framePeriodMs;
         }
@@ -2021,30 +2508,79 @@ void taskVideoDecode(void *pvParameters) {
 void taskDisplayFlush(void *pvParameters) {
     VideoPacket packet;
     VideoPacket latestPacket;
+    bool hasPending = false;
+    VideoPacket pendingPacket;
     while (true) {
         if (!videoPipelineActive || !displayReady || isUploading || currentMediaType != MEDIA_VIDEO) {
+            if (hasPending && _packetUsesFrameBuffer(pendingPacket)) {
+                _releaseVideoFrameBuffer(pendingPacket.frameIndex);
+            }
+            hasPending = false;
             vTaskDelay(pdMS_TO_TICKS(25));
             continue;
         }
 
-        if (xQueueReceive(videoDisplayQueue, &packet, pdMS_TO_TICKS(2)) == pdTRUE) {
-            while (xQueueReceive(videoDisplayQueue, &latestPacket, 0) == pdTRUE) {
-                packet = latestPacket;
-                videoFramesDropped++;
-            }
-
-            if ((videoUseRawFrameStream || videoUseMjpegStream) && packet.frameIndex <= 1 && videoFrameBuffers[packet.frameIndex]) {
-                st7789DrawFrameRGB565(videoFrameBuffers[packet.frameIndex], TFT_WIDTH, TFT_HEIGHT);
-            } else {
-                st7789FillColor(packet.color565);
+        bool audioSyncedVideo = videoCompanionAudioActive && (videoUseMjpegStream || videoUseHmjStream);
+        if (audioSyncedVideo) {
+            if (!hasPending) {
+                if (xQueueReceive(videoDisplayQueue, &pendingPacket, pdMS_TO_TICKS(2)) == pdTRUE) {
+                    hasPending = true;
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(1));
+                    continue;
+                }
             }
 
             uint32_t playbackClockMs = _videoPlaybackClockMs();
-            videoAvDriftMs = (int32_t)playbackClockMs - (int32_t)packet.ptsMs;
-            videoFramesDisplayed++;
-            continue;
+            int32_t lateMs = (int32_t)(playbackClockMs - pendingPacket.ptsMs);
+            if (lateMs > (int32_t)MJPEG_DISPLAY_DROP_LAG_MS) {
+                if (_packetUsesFrameBuffer(pendingPacket)) {
+                    _releaseVideoFrameBuffer(pendingPacket.frameIndex);
+                }
+                videoFramesDropped++;
+                hasPending = false;
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+
+            if (lateMs < 0) {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
+
+            packet = pendingPacket;
+            hasPending = false;
+        } else {
+            if (xQueueReceive(videoDisplayQueue, &packet, pdMS_TO_TICKS(2)) == pdTRUE) {
+                while (xQueueReceive(videoDisplayQueue, &latestPacket, 0) == pdTRUE) {
+                    if (_packetUsesFrameBuffer(packet)) {
+                        _releaseVideoFrameBuffer(packet.frameIndex);
+                    }
+                    packet = latestPacket;
+                    videoFramesDropped++;
+                }
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(1));
+                continue;
+            }
         }
 
+        uint32_t drawStartMs = millis();
+        if (_packetUsesFrameBuffer(packet)) {
+            st7789DrawFrameRGB565(videoFrameBuffers[packet.frameIndex], TFT_WIDTH, TFT_HEIGHT);
+        } else {
+            st7789FillColor(packet.color565);
+        }
+        _recordMovingAverage(videoDrawLastMs, videoDrawAvgMs, videoDrawMaxMs, millis() - drawStartMs);
+
+        uint32_t playbackClockMs = _videoPlaybackClockMs();
+        videoLastAudioClockMs = playbackClockMs;
+        videoLastFramePtsMs = packet.ptsMs;
+        videoAvDriftMs = (int32_t)playbackClockMs - (int32_t)packet.ptsMs;
+        videoFramesDisplayed++;
+        if (_packetUsesFrameBuffer(packet)) {
+            _releaseVideoFrameBuffer(packet.frameIndex);
+        }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -2209,7 +2745,7 @@ void setup() {
     xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, NULL, PRIO_AUDIO, &audioTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, NULL, PRIO_LED, &ledTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskVideoDecode, "VideoDecodeTask", 12288, NULL, PRIO_VIDEO, &videoDecodeTaskHandle, CORE_VIDEO);
-    xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, NULL, PRIO_VIDEO, &displayFlushTaskHandle, CORE_VIDEO);
+    xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, NULL, PRIO_DISPLAY, &displayFlushTaskHandle, CORE_VIDEO);
 
 }
 //                 }
@@ -2272,7 +2808,8 @@ void handleApiFiles() {
                 name.toLowerCase();
                 if (name.endsWith(".mp3")) {
                     f["type"] = "audio";
-                } else if (name.endsWith(".mjpg") || name.endsWith(".mjpeg") || name.endsWith(".vid") || name.endsWith(".v16") || name.endsWith(".rgb")) {
+                } else if (name.endsWith(".hmj") || name.endsWith(".mjpg") || name.endsWith(".mjpeg") ||
+                           name.endsWith(".vid") || name.endsWith(".v16") || name.endsWith(".rgb")) {
                     f["type"] = "video";
                 } else if (name.endsWith(".part")) {
                     f["type"] = "partial";
@@ -2331,7 +2868,8 @@ void handleApiPlay() {
 
     String fnameLower = filename;
     fnameLower.toLowerCase();
-    if (fnameLower.endsWith(".mjpg") || fnameLower.endsWith(".mjpeg") || fnameLower.endsWith(".vid") || fnameLower.endsWith(".v16") || fnameLower.endsWith(".rgb")) {
+    if (fnameLower.endsWith(".hmj") || fnameLower.endsWith(".mjpg") || fnameLower.endsWith(".mjpeg") ||
+        fnameLower.endsWith(".vid") || fnameLower.endsWith(".v16") || fnameLower.endsWith(".rgb")) {
         audioAbortRequested = false;
         if (audioCmdQueue) {
             xQueueReset(audioCmdQueue);
@@ -2383,8 +2921,11 @@ void handleApiStop() {
     videoFramesDecoded = 0;
     videoFramesDisplayed = 0;
     videoFramesDropped = 0;
+    videoFramesSkipped = 0;
     videoAvDriftMs = 0;
     videoStart_state = VIDEO_START_IDLE;
+    videoFrameCount = 0;
+    _resetVideoFrameQueues();
 
     server.send(200, "application/json", "{\"status\":\"Playback stopped\"}");
 }
@@ -2570,7 +3111,7 @@ void handleApiLedBrightness() {
 }
 
 void handleApiStatus() {
-    DynamicJsonDocument doc(1024);
+    DynamicJsonDocument doc(1536);
     
     doc["power"] = systemPowerOn ? "on" : "off";
     
@@ -2599,6 +3140,8 @@ void handleApiStatus() {
     video["pipeline"] = videoPipelineActive;
     if (videoUseRawFrameStream) {
         video["mode"] = "raw-frame";
+    } else if (videoUseHmjStream) {
+        video["mode"] = "hmj";
     } else if (videoUseMjpegStream) {
         video["mode"] = "mjpeg";
     } else if (videoUseFileStream) {
@@ -2609,8 +3152,20 @@ void handleApiStatus() {
     video["targetFps"] = videoTargetFps;
     video["decodedFrames"] = videoFramesDecoded;
     video["displayedFrames"] = videoFramesDisplayed;
+    video["skippedFrames"] = videoFramesSkipped;
     video["droppedFrames"] = videoFramesDropped;
+    video["frameCount"] = videoFrameCount;
+    video["queueDepth"] = videoDisplayQueue ? uxQueueMessagesWaiting(videoDisplayQueue) : 0;
+    video["freeBuffers"] = videoFreeFrameQueue ? uxQueueMessagesWaiting(videoFreeFrameQueue) : 0;
+    video["lastFramePtsMs"] = videoLastFramePtsMs;
+    video["audioClockMs"] = videoLastAudioClockMs;
     video["avDriftMs"] = videoAvDriftMs;
+    video["decodeLastMs"] = videoDecodeLastMs;
+    video["decodeAvgMs"] = videoDecodeAvgMs;
+    video["decodeMaxMs"] = videoDecodeMaxMs;
+    video["drawLastMs"] = videoDrawLastMs;
+    video["drawAvgMs"] = videoDrawAvgMs;
+    video["drawMaxMs"] = videoDrawMaxMs;
     video["eof"] = videoStreamEof;
     video["companionAudio"] = videoCompanionAudioActive;
     video["sessionId"] = videoSessionId;
@@ -3097,13 +3652,13 @@ void handleApiMediaUpload() {
         if (audioCmdQueue) {
             xQueueReset(audioCmdQueue);
         }
-        if (videoDisplayQueue) {
-            xQueueReset(videoDisplayQueue);
-        }
+        _resetVideoFrameQueues();
         videoFramesDecoded = 0;
         videoFramesDisplayed = 0;
         videoFramesDropped = 0;
+        videoFramesSkipped = 0;
         videoAvDriftMs = 0;
+        videoFrameCount = 0;
         videoStart_state = VIDEO_START_IDLE;
         currentMediaType = MEDIA_NONE;
         currentFilename = "";
