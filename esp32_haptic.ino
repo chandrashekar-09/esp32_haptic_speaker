@@ -903,6 +903,8 @@ void _releaseVideoFrameBuffer(uint8_t frameIndex) {
 }
 
 void _resetVideoFrameQueues() {
+    if (!videoDisplayQueue && !videoFreeFrameQueue) return;
+    vTaskSuspendAll();
     if (videoDisplayQueue) {
         VideoPacket packet;
         while (xQueueReceive(videoDisplayQueue, &packet, 0) == pdTRUE) {
@@ -911,12 +913,16 @@ void _resetVideoFrameQueues() {
             }
         }
     }
-    if (!videoFreeFrameQueue) return;
-    xQueueReset(videoFreeFrameQueue);
-    for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
-        if (videoFrameBuffers[i]) {
-            xQueueSend(videoFreeFrameQueue, &i, 0);
+    if (videoFreeFrameQueue) {
+        xQueueReset(videoFreeFrameQueue);
+        for (uint8_t i = 0; i < VIDEO_FRAME_BUFFER_COUNT; i++) {
+            if (videoFrameBuffers[i]) {
+                xQueueSend(videoFreeFrameQueue, &i, 0);
+            }
         }
+    }
+    if (xTaskResumeAll() == pdTRUE) {
+        taskYIELD();
     }
 }
 
@@ -1004,6 +1010,7 @@ void taskWebServer(void *pvParameters) {
 
 void taskAudio(void *pvParameters) {
     uint32_t lastVideoAudioPumpMs = 0;
+    uint32_t lastAudioMutexLogMs = 0;
     while (true) {
         if (audioAbortRequested) {
             _stopAudioSafely();
@@ -1050,6 +1057,11 @@ void taskAudio(void *pvParameters) {
                     }
                     xSemaphoreGive(audioMutex);
                 } else {
+                    uint32_t now = millis();
+                    if ((now - lastAudioMutexLogMs) >= 1000U) {
+                        Serial.println("WARN: Audio mutex busy; skipping pump cycle");
+                        lastAudioMutexLogMs = now;
+                    }
                     playing = true;
                 }
             } else if (mp3 && mp3->isRunning()) {
@@ -1829,6 +1841,10 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
             }
             if (MJPEG_FLIP_Y) {
                 srcY = (uint16_t)(decodeOut.height - 1U - srcY);
+            }
+
+            if (srcX >= decodeOut.width || srcY >= decodeOut.height) {
+                continue;
             }
 
             size_t srcIndex = ((size_t)srcY * (size_t)decodeOut.width + (size_t)srcX) * 2U;
