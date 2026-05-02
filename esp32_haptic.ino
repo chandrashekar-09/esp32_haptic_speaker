@@ -3063,6 +3063,7 @@ void handleApiSeek() {
 
 void handleApiCurrent() {
     DynamicJsonDocument doc(512);
+    static uint32_t lastAudioStatusLockLogMs = 0;
     
     doc["playing"] = (!isPaused && currentMediaType == MEDIA_AUDIO && currentFilename != "");
     doc["paused"] = isPaused;
@@ -3078,6 +3079,13 @@ void handleApiCurrent() {
         bool audioLocked = false;
         if (audioMutex) {
             audioLocked = (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(20)) == pdTRUE);
+            if (!audioLocked) {
+                uint32_t now = millis();
+                if ((now - lastAudioStatusLockLogMs) >= 1000U) {
+                    Serial.println("WARN: Audio mutex busy during status read");
+                    lastAudioStatusLockLogMs = now;
+                }
+            }
         }
         // If the audio mutex failed to initialize, proceed without locking for status reads.
         if (!audioMutex || audioLocked) {
