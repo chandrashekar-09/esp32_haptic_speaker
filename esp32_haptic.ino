@@ -3063,6 +3063,7 @@ void handleApiCurrent() {
         if (audioMutex) {
             audioLocked = (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(20)) == pdTRUE);
         }
+        // If the audio mutex failed to initialize, proceed without locking for status reads.
         if (!audioMutex || audioLocked) {
             if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
                 if (fileSource && fileSource->isOpen()) {
