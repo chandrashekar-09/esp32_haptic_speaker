@@ -157,7 +157,7 @@ File videoHmjFile;
 uint32_t videoRawHeaderSize = 0;
 uint16_t videoRawWidth = 240;
 uint16_t videoRawHeight = 280;
-uint16_t videoRawFps = 12;
+uint16_t videoRawFps = 15;
 size_t videoRawFrameSize = 0;
 
 uint8_t *videoFrameBuffers[3] = {
@@ -189,20 +189,20 @@ volatile bool videoMjpegLastReadEof = false;
 volatile bool videoHmjLastReadEof = false;
 uint16_t videoHmjWidth = 240;
 uint16_t videoHmjHeight = 280;
-uint16_t videoHmjFps = 12;
+uint16_t videoHmjFps = 15;
 uint32_t videoHmjFrameCount = 0;
 uint32_t videoHmjCurrentFrame = 0;
 uint32_t videoHmjHeaderSize = 0;
-# 189 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 193 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 volatile bool videoCompanionAudioActive = false;
 bool videoCompanionAudioLoop = false;
 String videoCompanionAudioFile = "";
 volatile uint32_t videoCompanionAudioStartMs = 0;
 volatile bool videoSdReadInProgress = false;
 uint8_t *videoCompanionMp3Data = 
-# 194 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 198 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                 __null
-# 194 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 198 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                     ;
 size_t videoCompanionMp3Size = 0;
 volatile bool videoCompanionInRam = false;
@@ -237,14 +237,14 @@ static const TickType_t LED_DELAY_NORMAL = ( ( TickType_t ) ( ( ( TickType_t ) (
 static const TickType_t LED_DELAY_VIDEO = ( ( TickType_t ) ( ( ( TickType_t ) ( 50 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) );
 
 SPIClass *tftSpi = 
-# 227 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 231 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                   __null
-# 227 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 231 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                       ;
 SemaphoreHandle_t tftMutex = 
-# 228 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 232 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 228 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 232 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 ;
 
 extern SemaphoreHandle_t sdMutex;
@@ -268,9 +268,9 @@ public:
         _lrc = lrc;
         _dout = dout;
         tx_chan = 
-# 250 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 254 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                  __null
-# 250 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 254 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                      ;
     }
 
@@ -311,9 +311,9 @@ public:
         chan_cfg.dma_desc_num = _dmaDescNum; // Deep buffer for dropout prevention
         chan_cfg.dma_frame_num = _dmaFrameNum; // ~270ms of audio buffer
         esp_err_t err = i2s_new_channel(&chan_cfg, &tx_chan, 
-# 289 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 293 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                             __null
-# 289 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 293 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                                 );
         if (err != 0 /*!< esp_err_t value indicating success (no error) */) {
             Serial0.println("I2S channel allocation failed");
@@ -410,9 +410,9 @@ public:
             i2s_channel_disable(tx_chan);
             i2s_del_channel(tx_chan);
             tx_chan = 
-# 384 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 388 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                      __null
-# 384 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 388 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                          ;
         }
         return true;
@@ -420,24 +420,24 @@ public:
 };
 
 AudioFileSource *fileSource = 
-# 390 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 394 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                              __null
-# 390 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 394 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                  ;
 AudioFileSourceID3 *id3Source = 
-# 391 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 395 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                __null
-# 391 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 395 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                    ;
 AudioGeneratorMP3 *mp3 = 
-# 392 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 396 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                         __null
-# 392 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 396 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                             ;
 AudioOutputHaptic *out = 
-# 393 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 397 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                         __null
-# 393 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 397 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                             ;
 
 // -------------------- Forward Declarations & IPC --------------------
@@ -510,13 +510,22 @@ extern String uploadPartialPath;
 extern volatile bool uploadProcessingDone;
 
 SemaphoreHandle_t sdMutex = 
-# 464 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 468 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                            __null
-# 464 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 468 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                ;
+SemaphoreHandle_t audioMutex = 
+# 469 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+                              __null
+# 469 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+                                  ;
 
 // -------------------- Loop (Core 1) --------------------
 void _stopAudioSafely() {
+    if (audioMutex) {
+        // Callers only invoke stop after releasing audioMutex, so blocking here is safe.
+        xQueueSemaphoreTake( ( audioMutex ), ( ( TickType_t ) 0xffffffffUL ) );
+    }
     isPaused = true; // Stop play loop entry before deleting memory
     currentMediaType = MEDIA_NONE;
 
@@ -528,26 +537,26 @@ void _stopAudioSafely() {
         if (mp3->isRunning()) mp3->stop();
         delete mp3;
         mp3 = 
-# 478 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 487 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
              __null
-# 478 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 487 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                  ;
     }
     if (id3Source) {
         delete id3Source;
         id3Source = 
-# 482 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 491 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                    __null
-# 482 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 491 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                        ;
     }
     if (fileSource) {
         if (fileSource->isOpen()) fileSource->close();
         delete fileSource;
         fileSource = 
-# 487 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 496 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                     __null
-# 487 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 496 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                         ;
     }
 
@@ -564,9 +573,9 @@ void _stopAudioSafely() {
 
     if (sdMutex) {
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 502 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 511 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 502 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 511 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     }
 
@@ -587,10 +596,20 @@ void _stopAudioSafely() {
     }
     videoStart_state = VIDEO_START_IDLE;
     _resetVideoFrameQueues();
+    if (audioMutex) {
+        xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 532 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+       __null
+# 532 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+       , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+    }
     isPaused = false;
 }
 
 void _stopAudioDecoderOnly() {
+    if (audioMutex) {
+        xQueueSemaphoreTake( ( audioMutex ), ( ( TickType_t ) 0xffffffffUL ) );
+    }
     if (sdMutex) {
         xQueueSemaphoreTake( ( sdMutex ), ( ( TickType_t ) 0xffffffffUL ) );
     }
@@ -599,34 +618,34 @@ void _stopAudioDecoderOnly() {
         if (mp3->isRunning()) mp3->stop();
         delete mp3;
         mp3 = 
-# 533 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 548 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
              __null
-# 533 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 548 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                  ;
     }
     if (id3Source) {
         delete id3Source;
         id3Source = 
-# 537 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 552 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                    __null
-# 537 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 552 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                        ;
     }
     if (fileSource) {
         if (fileSource->isOpen()) fileSource->close();
         delete fileSource;
         fileSource = 
-# 542 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 557 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                     __null
-# 542 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 557 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                         ;
     }
 
     if (sdMutex) {
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 546 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 561 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 546 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 561 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     }
 
@@ -635,15 +654,22 @@ void _stopAudioDecoderOnly() {
     }
 
     _releaseCompanionAudioRam();
+    if (audioMutex) {
+        xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 570 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+       __null
+# 570 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+       , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+    }
 }
 
 void _releaseCompanionAudioRam() {
     if (videoCompanionMp3Data) {
         free(videoCompanionMp3Data);
         videoCompanionMp3Data = 
-# 559 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 577 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                __null
-# 559 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 577 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                    ;
     }
     videoCompanionMp3Size = 0;
@@ -656,9 +682,9 @@ void _releaseCompanionAudioRam() {
 bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize) {
     if (!outData || !outSize || !sdMutex) return false;
     *outData = 
-# 570 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 588 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
               __null
-# 570 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 588 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                   ;
     *outSize = 0;
 
@@ -709,9 +735,9 @@ bool _loadFileToPsram(const String& filename, uint8_t **outData, size_t *outSize
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 619 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 637 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 619 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 637 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return ok;
 }
@@ -725,6 +751,10 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
         _stopAudioSafely();
     } else {
         _stopAudioDecoderOnly();
+    }
+
+    if (audioMutex) {
+        xQueueSemaphoreTake( ( audioMutex ), ( ( TickType_t ) 0xffffffffUL ) );
     }
 
     if (!updateMediaState) {
@@ -779,19 +809,19 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
 
         if (!success) {
             if (mp3) { delete mp3; mp3 = 
-# 685 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 707 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                         __null
-# 685 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 707 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                             ; }
             if (id3Source) { delete id3Source; id3Source = 
-# 686 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 708 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                           __null
-# 686 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 708 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                               ; }
             if (fileSource) { delete fileSource; fileSource = 
-# 687 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 709 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                              __null
-# 687 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 709 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                                  ; }
             _releaseCompanionAudioRam();
             videoCompanionAudioActive = false;
@@ -802,6 +832,13 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
             isPaused = false;
         }
 
+        if (audioMutex) {
+            xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 720 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+           __null
+# 720 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+           , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+        }
         return success;
     }
 
@@ -831,9 +868,9 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
                 clamped = fileSize - 1;
             }
             fileSource->seek(clamped, 
-# 725 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3
+# 750 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3
                                      0
-# 725 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 750 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                              );
         }
 
@@ -874,22 +911,22 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
 
     if (!success) {
         if (mp3) { delete mp3; mp3 = 
-# 764 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 789 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                     __null
-# 764 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 789 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                         ; }
         if (id3Source) { delete id3Source; id3Source = 
-# 765 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 790 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                       __null
-# 765 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 790 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                           ; }
         if (fileSource) {
             if (fileSource->isOpen()) fileSource->close();
             delete fileSource;
             fileSource = 
-# 769 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 794 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                         __null
-# 769 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 794 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                             ;
         }
         if (updateMediaState) {
@@ -908,10 +945,17 @@ bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t st
     }
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 786 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 811 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 786 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 811 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+    if (audioMutex) {
+        xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 813 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+       __null
+# 813 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+       , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+    }
     return success;
 }
 
@@ -1007,15 +1051,29 @@ void _releaseVideoFrameBuffer(uint8_t frameIndex) {
 }
 
 void _resetVideoFrameQueues() {
-    if (videoDisplayQueue) {
-        xQueueGenericReset( ( videoDisplayQueue ), ( ( BaseType_t ) 0 ) );
+    if (!videoDisplayQueue && !videoFreeFrameQueue) {
+        return;
     }
-    if (!videoFreeFrameQueue) return;
-    xQueueGenericReset( ( videoFreeFrameQueue ), ( ( BaseType_t ) 0 ) );
-    for (uint8_t i = 0; i < 3; i++) {
-        if (videoFrameBuffers[i]) {
-            xQueueGenericSend( ( videoFreeFrameQueue ), ( &i ), ( 0 ), ( ( BaseType_t ) 0 ) );
+    vTaskSuspendAll();
+    if (videoDisplayQueue) {
+        VideoPacket packet;
+        while (xQueueReceive(videoDisplayQueue, &packet, 0) == ( ( BaseType_t ) 1 )) {
+            if (_packetUsesFrameBuffer(packet)) {
+                _releaseVideoFrameBuffer(packet.frameIndex);
+            }
         }
+    }
+    if (videoFreeFrameQueue) {
+        xQueueGenericReset( ( videoFreeFrameQueue ), ( ( BaseType_t ) 0 ) );
+        for (uint8_t i = 0; i < 3; i++) {
+            if (videoFrameBuffers[i]) {
+                xQueueGenericSend( ( videoFreeFrameQueue ), ( &i ), ( 0 ), ( ( BaseType_t ) 0 ) );
+            }
+        }
+    }
+    // Yield if a higher-priority task was unblocked while the scheduler was suspended.
+    if (xTaskResumeAll() == ( ( BaseType_t ) 1 )) {
+        vPortYield();
     }
 }
 
@@ -1054,6 +1112,49 @@ void _setUploadTaskSuspension(bool suspendTasks) {
     }
 }
 
+static bool _pumpMp3Playback(bool isCompanionDuringVideo, uint32_t &lastVideoAudioPumpMs) {
+    if (!mp3) return true;
+    if (!sdMutex) return true;
+
+    if (isCompanionDuringVideo && videoCompanionInRam) {
+        uint32_t now = millis();
+        if ((now - lastVideoAudioPumpMs) < 3U) {
+            return true;
+        }
+        bool playing = mp3->loop();
+        lastVideoAudioPumpMs = now;
+        return playing;
+    }
+
+    if (isCompanionDuringVideo) {
+        if (videoSdReadInProgress) {
+            return true;
+        }
+        if (xQueueSemaphoreTake( ( sdMutex ), ( 0 ) ) == ( ( BaseType_t ) 1 )) {
+            bool playing = mp3->loop();
+            xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
+# 991 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+           __null
+# 991 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+           , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+            return playing;
+        }
+        return true;
+    }
+
+    if (xQueueSemaphoreTake( ( sdMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 10 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
+        bool playing = mp3->loop();
+        xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
+# 999 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+       __null
+# 999 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+       , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+        return playing;
+    }
+
+    return true;
+}
+
 // -------------------- Tasks --------------------
 void taskWebServer(void *pvParameters) {
     while (true) {
@@ -1068,6 +1169,7 @@ void taskWebServer(void *pvParameters) {
 
 void taskAudio(void *pvParameters) {
     uint32_t lastVideoAudioPumpMs = 0;
+    uint32_t lastAudioMutexLogMs = 0;
     while (true) {
         if (audioAbortRequested) {
             _stopAudioSafely();
@@ -1102,71 +1204,60 @@ void taskAudio(void *pvParameters) {
         }
 
         // Audio Playback Pump safely wrapped in sdMutex to prevent SPI collisions
-        if (!isPaused && mp3 && mp3->isRunning()) {
-            bool playing = false;
-
-            bool isCompanionDuringVideo = (currentMediaType == MEDIA_VIDEO && videoCompanionAudioActive);
-
-            if (isCompanionDuringVideo && videoCompanionInRam) {
-                uint32_t now = millis();
-                if ((now - lastVideoAudioPumpMs) < 3U) {
-                    playing = true;
-                } else if (mp3) {
-                    playing = mp3->loop();
-                    lastVideoAudioPumpMs = now;
-                } else {
-                    playing = true;
-                }
-            } else if (isCompanionDuringVideo) {
-                if (videoSdReadInProgress) {
-                    playing = true;
-                } else if (mp3 && xQueueSemaphoreTake( ( sdMutex ), ( 0 ) )) {
-                    playing = mp3->loop();
-                    xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 997 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+        bool playing = false;
+        bool hasMp3 = false;
+        bool isCompanionDuringVideo = (currentMediaType == MEDIA_VIDEO && videoCompanionAudioActive);
+        if (!isPaused) {
+            if (audioMutex) {
+                if (xQueueSemaphoreTake( ( audioMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 20 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
+                    if (mp3 && mp3->isRunning()) {
+                        hasMp3 = true;
+                        playing = _pumpMp3Playback(isCompanionDuringVideo, lastVideoAudioPumpMs);
+                    }
+                    xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 1065 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                    __null
-# 997 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1065 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                 } else {
+                    uint32_t now = millis();
+                    if ((now - lastAudioMutexLogMs) >= 1000U) {
+                        Serial0.println("WARN: Audio mutex busy; skipping pump cycle");
+                        lastAudioMutexLogMs = now;
+                    }
                     playing = true;
                 }
-            } else if (mp3 && xQueueSemaphoreTake( ( sdMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 10 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) )) {
-                playing = mp3->loop();
-                xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1003 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
-               __null
-# 1003 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
-               , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
-            } else {
-                playing = true;
+            } else if (mp3 && mp3->isRunning()) {
+                hasMp3 = true;
+                playing = _pumpMp3Playback(isCompanionDuringVideo, lastVideoAudioPumpMs);
             }
+        }
 
-            if (!playing) {
-                if (currentMediaType == MEDIA_AUDIO) {
-                    String finishedTrack = currentFilename;
-                    bool shouldLoop = loopEnabled;
-                    uint32_t sessionAtEnd = activeSessionId;
-                    _stopAudioSafely();
+        if (hasMp3 && !playing) {
+            if (currentMediaType == MEDIA_AUDIO) {
+                String finishedTrack = currentFilename;
+                bool shouldLoop = loopEnabled;
+                uint32_t sessionAtEnd = activeSessionId;
+                _stopAudioSafely();
 
-                    if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
-                        Serial0.println("Restarting loop...");
-                        _startAudioPlayback(finishedTrack, true, 0, true, sessionAtEnd);
-                    } else {
-                        Serial0.println("Playback finished naturally");
-                    }
-                } else if (videoCompanionAudioActive) {
-                    String finishedTrack = videoCompanionAudioFile;
-                    bool shouldLoop = videoCompanionAudioLoop;
-                    uint32_t sessionAtEnd = activeSessionId;
-                    _stopAudioDecoderOnly();
+                if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
+                    Serial0.println("Restarting loop...");
+                    _startAudioPlayback(finishedTrack, true, 0, true, sessionAtEnd);
+                } else {
+                    Serial0.println("Playback finished naturally");
+                }
+            } else if (videoCompanionAudioActive) {
+                String finishedTrack = videoCompanionAudioFile;
+                bool shouldLoop = videoCompanionAudioLoop;
+                uint32_t sessionAtEnd = activeSessionId;
+                _stopAudioDecoderOnly();
 
-                    if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
-                        _startAudioPlayback(finishedTrack, true, 0, false, sessionAtEnd);
-                    } else {
-                        videoCompanionAudioActive = false;
-                        videoCompanionAudioLoop = false;
-                        videoCompanionAudioFile = "";
-                    }
+                if (shouldLoop && finishedTrack.length() > 0 && !stopRequested && sessionAtEnd != 0 && sessionAtEnd == mediaSessionId) {
+                    _startAudioPlayback(finishedTrack, true, 0, false, sessionAtEnd);
+                } else {
+                    videoCompanionAudioActive = false;
+                    videoCompanionAudioLoop = false;
+                    videoCompanionAudioFile = "";
                 }
             }
         }
@@ -1195,9 +1286,9 @@ void taskLEDs(void *pvParameters) {
             FastLED.show();
         } else if (ledMode == "manual") {
             long number = strtol(&ledColorHex[1], 
-# 1061 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1132 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                  __null
-# 1061 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1132 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                      , 16);
             int r = number >> 16;
             int g = number >> 8 & 0xFF;
@@ -1249,9 +1340,9 @@ void initDisplayVideoScaffold() {
             if (videoFrameBuffers[i]) {
                 free(videoFrameBuffers[i]);
                 videoFrameBuffers[i] = 
-# 1111 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1182 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                       __null
-# 1111 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1182 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                           ;
             }
         }
@@ -1266,14 +1357,14 @@ void initDisplayVideoScaffold() {
         if (videoMjpegFrameData) free(videoMjpegFrameData);
         if (videoMjpegDecodeBuffer) free(videoMjpegDecodeBuffer);
         videoMjpegFrameData = 
-# 1124 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1195 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                              __null
-# 1124 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1195 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                  ;
         videoMjpegDecodeBuffer = 
-# 1125 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1196 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                 __null
-# 1125 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1196 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                     ;
         videoMjpegFrameCapacity = 0;
         videoMjpegDecodeBufferSize = 0;
@@ -1322,9 +1413,9 @@ void st7789WriteCommand(uint8_t command, const uint8_t *data, size_t dataLen) {
     tftSpi->endTransaction();
 
     if (tftMutex) xQueueGenericSend( ( QueueHandle_t ) ( tftMutex ), 
-# 1172 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1243 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                  __null
-# 1172 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1243 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                  , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
 }
 
@@ -1346,9 +1437,9 @@ void st7789SetAddressWindow(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) 
     st7789WriteCommand(0x2A, colData, sizeof(colData));
     st7789WriteCommand(0x2B, rowData, sizeof(rowData));
     st7789WriteCommand(0x2C, 
-# 1192 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1263 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 1192 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1263 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 , 0);
 }
 
@@ -1395,9 +1486,9 @@ void st7789FillColor(uint16_t color) {
     tftSpi->endTransaction();
 
     if (tftMutex) xQueueGenericSend( ( QueueHandle_t ) ( tftMutex ), 
-# 1237 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1308 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                  __null
-# 1237 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1308 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                  , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
 }
 
@@ -1444,9 +1535,9 @@ void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t he
     tftSpi->endTransaction();
 
     if (tftMutex) xQueueGenericSend( ( QueueHandle_t ) ( tftMutex ), 
-# 1282 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1353 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                  __null
-# 1282 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1353 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                  , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
 }
 
@@ -1459,15 +1550,15 @@ bool initSt7789Panel() {
     delay(120);
 
     st7789WriteCommand(0x01, 
-# 1293 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1364 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 1293 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1364 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 , 0); // SWRESET
     delay(120);
     st7789WriteCommand(0x11, 
-# 1295 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1366 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 1295 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1366 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 , 0); // SLPOUT
     delay(120);
 
@@ -1505,19 +1596,19 @@ bool initSt7789Panel() {
     st7789WriteCommand(0xD0, &pwctrl1, 1);
 
     st7789WriteCommand(0x21, 
-# 1331 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1402 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 1331 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1402 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 , 0); // INVON
     st7789WriteCommand(0x13, 
-# 1332 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1403 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 1332 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1403 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 , 0); // NORON
     st7789WriteCommand(0x29, 
-# 1333 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1404 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                             __null
-# 1333 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1404 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                 , 0); // DISPON
     delay(20);
 
@@ -1667,9 +1758,9 @@ bool _openVideoColorStream(const String& filename) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1481 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1552 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1481 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1552 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return ok;
 }
@@ -1684,9 +1775,9 @@ bool _readNextVideoPacket(VideoPacket &packet) {
 
     if (!videoStreamFile) {
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1494 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1565 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 1494 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1565 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         _videoSdReadEnd();
         return false;
@@ -1695,9 +1786,9 @@ bool _readNextVideoPacket(VideoPacket &packet) {
     uint8_t buffer[6] = {0};
     int readLen = videoStreamFile.read(buffer, sizeof(buffer));
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1501 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1572 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1501 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1572 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
 
@@ -1774,9 +1865,9 @@ bool _openRawFrameStream(const String& filename) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1576 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1647 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1576 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1647 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return ok;
 }
@@ -1791,9 +1882,9 @@ bool _readRawFrameToBuffer(uint8_t frameIndex) {
 
     if (!videoRawFile) {
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1589 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1660 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 1589 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1660 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         _videoSdReadEnd();
         return false;
@@ -1801,9 +1892,9 @@ bool _readRawFrameToBuffer(uint8_t frameIndex) {
 
     int readLen = videoRawFile.read(videoFrameBuffers[frameIndex], videoRawFrameSize);
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1595 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1666 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1595 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1666 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
     return readLen == (int)videoRawFrameSize;
@@ -1819,9 +1910,9 @@ bool _skipRawFrames(uint32_t frameCount) {
 
     if (!videoRawFile) {
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1609 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1680 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 1609 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1680 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         _videoSdReadEnd();
         return false;
@@ -1837,9 +1928,9 @@ bool _skipRawFrames(uint32_t frameCount) {
 
     bool ok = videoRawFile.seek((uint32_t)newPos, SeekSet);
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1623 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1694 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1623 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1694 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
     return ok;
@@ -1889,8 +1980,12 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
     }
 
     esp_jpeg_image_scale_t scale = _selectJpegScale(probeOut.width, probeOut.height);
+    const bool rotateCw = (0 != 0);
+    const bool rotateCcw = (1 != 0);
+    const bool needsRotate = rotateCw || rotateCcw;
+    const bool needsTransform = needsRotate || 0 || 0;
 
-    if (displayNative) {
+    if (displayNative && !needsTransform) {
         if (probeOut.width != 240 || probeOut.height != 280) {
             return false;
         }
@@ -1929,7 +2024,7 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
 
     uint16_t drawWidth = decodeOut.width;
     uint16_t drawHeight = decodeOut.height;
-    if (1) {
+    if (needsRotate) {
         drawWidth = decodeOut.height;
         drawHeight = decodeOut.width;
     }
@@ -1977,9 +2072,12 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
                 ty = (uint16_t)(cropY + ((uint32_t)y * (uint32_t)cropH) / (uint32_t)outH);
             }
 
-            if (1) {
+            if (rotateCw) {
                 srcX = ty;
                 srcY = (uint16_t)(decodeOut.height - 1U - tx);
+            } else if (rotateCcw) {
+                srcX = (uint16_t)(decodeOut.width - 1U - ty);
+                srcY = tx;
             } else {
                 srcX = tx;
                 srcY = ty;
@@ -1990,6 +2088,11 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
             }
             if (0) {
                 srcY = (uint16_t)(decodeOut.height - 1U - srcY);
+            }
+
+            // Defensive guard: rotation math should keep coordinates in range.
+            if (srcX >= decodeOut.width || srcY >= decodeOut.height) {
+                continue;
             }
 
             size_t srcIndex = ((size_t)srcY * (size_t)decodeOut.width + (size_t)srcX) * 2U;
@@ -2030,9 +2133,9 @@ bool _openMjpegStream(const String& filename) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1812 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1895 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1812 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1895 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return ok;
 }
@@ -2074,9 +2177,9 @@ bool _readMjpegFrameBytes(size_t *outFrameLen) {
 
     if (!videoMjpegFile) {
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1852 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1935 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 1852 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1935 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         _videoSdReadEnd();
         return false;
@@ -2127,9 +2230,9 @@ bool _readMjpegFrameBytes(size_t *outFrameLen) {
     }
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1901 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 1984 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1901 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 1984 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
 
@@ -2205,9 +2308,9 @@ bool _openHmjStream(const String& filename) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 1975 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2058 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 1975 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2058 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return ok;
 }
@@ -2251,9 +2354,9 @@ bool _readHmjFrameHeader(uint32_t *outPtsMs, uint32_t *outJpegLen) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2017 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2100 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 2017 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2100 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
     return ok;
@@ -2280,9 +2383,9 @@ bool _readHmjFramePayloadToBuffer(uint32_t jpegLen, uint8_t frameIndex) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2042 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2125 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 2042 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2125 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
 
@@ -2312,9 +2415,9 @@ bool _skipHmjFramePayload(uint32_t jpegLen) {
     } while (false);
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2070 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2153 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 2070 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2153 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
     return ok;
@@ -2333,9 +2436,9 @@ bool _rewindHmjStream() {
         videoHmjLastReadEof = false;
     }
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2087 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2170 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 2087 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2170 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     _videoSdReadEnd();
     return ok;
@@ -2371,9 +2474,9 @@ void _tryStartVideoCompanionAudio(const String& videoFilename, bool loopRequeste
     if (xQueueSemaphoreTake( ( sdMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 100 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
         exists = SD_MMC.exists(audioFile);
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2121 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2204 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 2121 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2204 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     }
 
@@ -2475,9 +2578,9 @@ void taskVideoDecode(void *pvParameters) {
                             _videoSdReadBegin();
                             videoRawFile.seek(videoRawHeaderSize, SeekSet);
                             xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2221 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2304 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                            __null
-# 2221 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2304 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                            , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                             _videoSdReadEnd();
                             videoStartMs = millis();
@@ -2657,9 +2760,9 @@ void taskVideoDecode(void *pvParameters) {
                                 _videoSdReadBegin();
                                 videoMjpegFile.seek(0, SeekSet);
                                 xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2399 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2482 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                __null
-# 2399 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2482 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                                 _videoSdReadEnd();
                                 videoStartMs = millis();
@@ -2716,9 +2819,9 @@ void taskVideoDecode(void *pvParameters) {
                         if (xQueueSemaphoreTake( ( sdMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 100 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
                             videoStreamFile.seek(videoStreamHeaderSize, SeekSet);
                             xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2454 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2537 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                            __null
-# 2454 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2537 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                            , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                             videoStartMs = millis();
                             videoFramesDecoded = 0;
@@ -2884,6 +2987,10 @@ void setup() {
     }
 
     sdMutex = xQueueCreateMutex( ( ( uint8_t ) 1U ) );
+    audioMutex = xQueueCreateMutex( ( ( uint8_t ) 1U ) );
+    if (!audioMutex) {
+        Serial0.println("WARN: Failed to create audio mutex");
+    }
     audioCmdQueue = xQueueGenericCreate( ( 8 ), ( sizeof(AudioCommandMessage) ), ( ( ( uint8_t ) 0U ) ) );
     if (!audioCmdQueue) {
         Serial0.println("ERROR: Failed to create audio command queue");
@@ -3010,29 +3117,29 @@ void setup() {
 
     // Create proper FreeRTOS Tasks
     xTaskCreatePinnedToCore(taskWebServer, "WebServerTask", 8192, 
-# 2744 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2831 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                                  __null
-# 2744 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2831 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                                      , PRIO_WEB, &webServerTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskAudio, "AudioTask", 16384, 
-# 2745 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2832 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                           __null
-# 2745 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2832 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                               , PRIO_AUDIO, &audioTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskLEDs, "LEDTask", 4096, 
-# 2746 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2833 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                       __null
-# 2746 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2833 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                           , PRIO_LED, &ledTaskHandle, CORE_SERVICE);
     xTaskCreatePinnedToCore(taskVideoDecode, "VideoDecodeTask", 12288, 
-# 2747 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2834 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                                       __null
-# 2747 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2834 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                                           , PRIO_VIDEO, &videoDecodeTaskHandle, CORE_VIDEO);
     xTaskCreatePinnedToCore(taskDisplayFlush, "DisplayFlushTask", 8192, 
-# 2748 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2835 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                                        __null
-# 2748 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2835 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                                            , PRIO_DISPLAY, &displayFlushTaskHandle, CORE_VIDEO);
 
 }
@@ -3081,9 +3188,9 @@ void handleApiFiles() {
         File root = SD_MMC.open("/");
         if (!root) {
             xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2795 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2882 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
            __null
-# 2795 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2882 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
            , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
             server.send(500, "application/json", "{\"error\":\"Failed to open directory\"}");
             return;
@@ -3115,9 +3222,9 @@ void handleApiFiles() {
         }
         root.close();
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 2825 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 2912 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 2825 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 2912 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     } else {
         server.send(503, "application/json", "{\"error\":\"SD busy during playback\"}");
@@ -3228,7 +3335,30 @@ void handleApiStop() {
 
 void handleApiPause() {
     Serial0.println("AUDIO_CMD_TOGGLE_PAUSE");
-    if (currentMediaType == MEDIA_AUDIO && mp3) {
+    bool hasMp3 = false;
+    if (currentMediaType == MEDIA_AUDIO) {
+        if (audioMutex) {
+            if (xQueueSemaphoreTake( ( audioMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 20 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
+                hasMp3 = (mp3 != 
+# 3026 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+                                __null
+# 3026 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+                                    );
+                xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 3027 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+               __null
+# 3027 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+               , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
+            }
+        } else {
+            hasMp3 = (mp3 != 
+# 3030 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+                            __null
+# 3030 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+                                );
+        }
+    }
+    if (hasMp3) {
         isPaused = !isPaused;
     }
     server.send(200, "application/json", String("{\"status\":\"Pause/Resume toggled\",\"paused\":") + (isPaused ? "true}" : "false}"));
@@ -3269,6 +3399,8 @@ void handleApiSeek() {
 
 void handleApiCurrent() {
     DynamicJsonDocument doc(512);
+    // WebServer handlers run on a single task; static throttle state keeps warnings to ~1 Hz.
+    static uint32_t lastAudioStatusLockLogMs = 0;
 
     doc["playing"] = (!isPaused && currentMediaType == MEDIA_AUDIO && currentFilename != "");
     doc["paused"] = isPaused;
@@ -3281,22 +3413,43 @@ void handleApiCurrent() {
     doc["type"] = typeStr;
 
     if (currentMediaType == MEDIA_AUDIO) {
-        if (xQueueSemaphoreTake( ( sdMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 20 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
-            if (fileSource && fileSource->isOpen()) {
-                uint32_t pos = fileSource->getPos();
-                uint32_t size = fileSource->getSize();
-                doc["position_bytes"] = pos;
-                doc["size_bytes"] = size;
-                doc["position"] = (uint32_t)((uint64_t)pos * 8ULL / 128000ULL);
-                doc["duration"] = (uint32_t)((uint64_t)size * 8ULL / 128000ULL);
+        bool audioLocked = false;
+        if (audioMutex) {
+            audioLocked = (xQueueSemaphoreTake( ( audioMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 20 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 ));
+            if (!audioLocked) {
+                uint32_t now = millis();
+                if ((now - lastAudioStatusLockLogMs) >= 1000U) {
+                    Serial0.println("WARN: Audio mutex busy during status read");
+                    lastAudioStatusLockLogMs = now;
+                }
             }
-            if (id3Source) {
-                doc["id3_parsed"] = true; // Ready for album arts down the line
+        }
+        // If the audio mutex failed to initialize, proceed without locking for status reads.
+        if (!audioMutex || audioLocked) {
+            if (xQueueSemaphoreTake( ( sdMutex ), ( ( ( TickType_t ) ( ( ( TickType_t ) ( 20 ) * ( TickType_t ) 1000 ) / ( TickType_t ) 1000U ) ) ) ) == ( ( BaseType_t ) 1 )) {
+                if (fileSource && fileSource->isOpen()) {
+                    uint32_t pos = fileSource->getPos();
+                    uint32_t size = fileSource->getSize();
+                    doc["position_bytes"] = pos;
+                    doc["size_bytes"] = size;
+                    doc["position"] = (uint32_t)((uint64_t)pos * 8ULL / 128000ULL);
+                    doc["duration"] = (uint32_t)((uint64_t)size * 8ULL / 128000ULL);
+                }
+                if (id3Source) {
+                    doc["id3_parsed"] = true; // Ready for album arts down the line
+                }
+                xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
+# 3113 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+               __null
+# 3113 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+               , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
             }
-            xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3000 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+        }
+        if (audioLocked) {
+            xQueueGenericSend( ( QueueHandle_t ) ( audioMutex ), 
+# 3117 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
            __null
-# 3000 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3117 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
            , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         }
     }
@@ -3521,9 +3674,9 @@ void handleApiMediaDelete() {
             server.send(404, "application/json", "{\"error\":\"File not found or locked\"}");
         }
         xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3223 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3340 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
        __null
-# 3223 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3340 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     } else {
         server.send(503, "application/json", "{\"error\":\"SD busy during playback\"}");
@@ -3541,9 +3694,9 @@ void handleApiMediaStorage() {
     uint64_t totalBytes = SD_MMC.totalBytes();
     uint64_t usedBytes = SD_MMC.usedBytes();
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3239 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3356 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 3239 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3356 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
 
     if (totalBytes == 0 || usedBytes > totalBytes) {
@@ -3573,9 +3726,9 @@ void handleApiMediaStorage() {
 
 File uploadFile;
 uint8_t *uploadWriteScratch = 
-# 3267 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3384 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                              __null
-# 3267 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3384 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                  ;
 size_t uploadBytesWritten = 0;
 size_t uploadBytesReceived = 0;
@@ -3599,14 +3752,14 @@ const size_t UPLOAD_YIELD_INTERVAL_BYTES = 8 * 1024;
 
 size_t uploadBytesSinceYield = 0;
 QueueHandle_t uploadWorkQueue = 
-# 3289 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3406 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                __null
-# 3289 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3406 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                    ;
 TaskHandle_t uploadWorkerTaskHandle = 
-# 3290 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3407 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                      __null
-# 3290 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3407 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                          ;
 
 enum UploadWorkType : uint8_t {
@@ -3736,9 +3889,9 @@ size_t _writeUploadChunkLocked(const uint8_t *data, size_t len) {
     }
 
     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3418 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3535 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
    __null
-# 3418 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3535 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return totalWritten;
 }
@@ -3758,16 +3911,16 @@ bool _ensureUploadWorker() {
 
     if (!uploadWorkerTaskHandle) {
         if (xTaskCreatePinnedToCore(taskUploadWorker, "UploadWorkerTask", 8192, 
-# 3436 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3553 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                                                                                __null
-# 3436 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3553 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                                                                    , PRIO_WEB + 1, &uploadWorkerTaskHandle, CORE_SERVICE) != ( ( ( BaseType_t ) 1 ) )) {
             _setUploadError("Failed to create upload worker task");
             vQueueDelete(uploadWorkQueue);
             uploadWorkQueue = 
-# 3439 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3556 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                              __null
-# 3439 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3556 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                                  ;
             return false;
         }
@@ -3813,9 +3966,9 @@ void taskUploadWorker(void *pvParameters) {
                     uploadFile.close();
                     uploadFile = File();
                     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3483 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3600 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                    __null
-# 3483 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3600 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                 }
             }
@@ -3864,9 +4017,9 @@ void taskUploadWorker(void *pvParameters) {
                     _setUploadError("Failed to open SD file for writing");
                 }
                 xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3530 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3647 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                __null
-# 3530 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3647 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
             } else {
                 _setUploadError("Failed to lock SD mutex for upload start (timeout)");
@@ -3935,9 +4088,9 @@ void taskUploadWorker(void *pvParameters) {
                     }
 
                     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3597 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3714 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                    __null
-# 3597 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3714 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                 } else {
                     _setUploadError("Failed to lock SD mutex during upload finalize (timeout)");
@@ -3965,9 +4118,9 @@ void taskUploadWorker(void *pvParameters) {
                         SD_MMC.remove(uploadPartialPath);
                     }
                     xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3623 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3740 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                    __null
-# 3623 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3740 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
                 }
             }
@@ -4076,9 +4229,9 @@ void handleApiMediaUpload() {
                 _setUploadError("Failed to open SD file for writing");
             }
             xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3730 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3847 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
            __null
-# 3730 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3847 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
            , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         } else {
             _setUploadError("Failed to lock SD mutex for upload start (timeout)");
@@ -4152,9 +4305,9 @@ void handleApiMediaUpload() {
                 }
 
                 xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3802 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3919 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
                __null
-# 3802 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3919 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
                , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
             } else {
                 _setUploadError("Failed to lock SD mutex during upload finalize (timeout)");
@@ -4179,9 +4332,9 @@ void handleApiMediaUpload() {
                 SD_MMC.remove(uploadPartialPath);
             }
             xQueueGenericSend( ( QueueHandle_t ) ( sdMutex ), 
-# 3825 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
+# 3942 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino" 3 4
            __null
-# 3825 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+# 3942 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
            , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         }
 
