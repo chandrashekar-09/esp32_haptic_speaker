@@ -906,7 +906,9 @@ void _resetVideoFrameQueues() {
     if (videoDisplayQueue) {
         VideoPacket packet;
         while (xQueueReceive(videoDisplayQueue, &packet, 0) == pdTRUE) {
-            // Drain display queue to avoid resetting while another task may be blocked.
+            if (_packetUsesFrameBuffer(packet)) {
+                _releaseVideoFrameBuffer(packet.frameIndex);
+            }
         }
     }
     if (!videoFreeFrameQueue) return;
@@ -951,6 +953,41 @@ void _setUploadTaskSuspension(bool suspendTasks) {
         if (ledTaskHandle) vTaskResume(ledTaskHandle);
         uploadTasksSuspended = false;
     }
+}
+
+static bool _pumpMp3Playback(bool isCompanionDuringVideo, uint32_t &lastVideoAudioPumpMs) {
+    if (!mp3) return true;
+    if (!sdMutex) return true;
+
+    if (isCompanionDuringVideo && videoCompanionInRam) {
+        uint32_t now = millis();
+        if ((now - lastVideoAudioPumpMs) < 3U) {
+            return true;
+        }
+        bool playing = mp3->loop();
+        lastVideoAudioPumpMs = now;
+        return playing;
+    }
+
+    if (isCompanionDuringVideo) {
+        if (videoSdReadInProgress) {
+            return true;
+        }
+        if (xSemaphoreTake(sdMutex, 0) == pdTRUE) {
+            bool playing = mp3->loop();
+            xSemaphoreGive(sdMutex);
+            return playing;
+        }
+        return true;
+    }
+
+    if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+        bool playing = mp3->loop();
+        xSemaphoreGive(sdMutex);
+        return playing;
+    }
+
+    return true;
 }
 
 // -------------------- Tasks --------------------
@@ -1009,31 +1046,7 @@ void taskAudio(void *pvParameters) {
                 if (xSemaphoreTake(audioMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
                     if (mp3 && mp3->isRunning()) {
                         hasMp3 = true;
-                        if (isCompanionDuringVideo && videoCompanionInRam) {
-                            uint32_t now = millis();
-                            if ((now - lastVideoAudioPumpMs) < 3U) {
-                                playing = true;
-                            } else if (mp3) {
-                                playing = mp3->loop();
-                                lastVideoAudioPumpMs = now;
-                            } else {
-                                playing = true;
-                            }
-                        } else if (isCompanionDuringVideo) {
-                            if (videoSdReadInProgress) {
-                                playing = true;
-                            } else if (mp3 && xSemaphoreTake(sdMutex, 0)) {
-                                playing = mp3->loop();
-                                xSemaphoreGive(sdMutex);
-                            } else {
-                                playing = true;
-                            }
-                        } else if (mp3 && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10))) {
-                            playing = mp3->loop();
-                            xSemaphoreGive(sdMutex);
-                        } else {
-                            playing = true;
-                        }
+                        playing = _pumpMp3Playback(isCompanionDuringVideo, lastVideoAudioPumpMs);
                     }
                     xSemaphoreGive(audioMutex);
                 } else {
@@ -1041,31 +1054,7 @@ void taskAudio(void *pvParameters) {
                 }
             } else if (mp3 && mp3->isRunning()) {
                 hasMp3 = true;
-                if (isCompanionDuringVideo && videoCompanionInRam) {
-                    uint32_t now = millis();
-                    if ((now - lastVideoAudioPumpMs) < 3U) {
-                        playing = true;
-                    } else if (mp3) {
-                        playing = mp3->loop();
-                        lastVideoAudioPumpMs = now;
-                    } else {
-                        playing = true;
-                    }
-                } else if (isCompanionDuringVideo) {
-                    if (videoSdReadInProgress) {
-                        playing = true;
-                    } else if (mp3 && xSemaphoreTake(sdMutex, 0)) {
-                        playing = mp3->loop();
-                        xSemaphoreGive(sdMutex);
-                    } else {
-                        playing = true;
-                    }
-                } else if (mp3 && xSemaphoreTake(sdMutex, pdMS_TO_TICKS(10))) {
-                    playing = mp3->loop();
-                    xSemaphoreGive(sdMutex);
-                } else {
-                    playing = true;
-                }
+                playing = _pumpMp3Playback(isCompanionDuringVideo, lastVideoAudioPumpMs);
             }
         }
 
