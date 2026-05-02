@@ -907,7 +907,9 @@ void _releaseVideoFrameBuffer(uint8_t frameIndex) {
 }
 
 void _resetVideoFrameQueues() {
-    if (!videoDisplayQueue && !videoFreeFrameQueue) return;
+    if (!videoDisplayQueue && !videoFreeFrameQueue) {
+        return;
+    }
     vTaskSuspendAll();
     if (videoDisplayQueue) {
         VideoPacket packet;
@@ -925,6 +927,7 @@ void _resetVideoFrameQueues() {
             }
         }
     }
+    // Yield if a higher-priority task was unblocked while the scheduler was suspended.
     if (xTaskResumeAll() == pdTRUE) {
         taskYIELD();
     }
@@ -1847,6 +1850,7 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
                 srcY = (uint16_t)(decodeOut.height - 1U - srcY);
             }
 
+            // Defensive guard: rotation math should keep coordinates in range.
             if (srcX >= decodeOut.width || srcY >= decodeOut.height) {
                 continue;
             }
@@ -3067,6 +3071,7 @@ void handleApiSeek() {
 
 void handleApiCurrent() {
     DynamicJsonDocument doc(512);
+    // WebServer handlers run on a single task; static throttle state is safe here.
     static uint32_t lastAudioStatusLockLogMs = 0;
     
     doc["playing"] = (!isPaused && currentMediaType == MEDIA_AUDIO && currentFilename != "");
