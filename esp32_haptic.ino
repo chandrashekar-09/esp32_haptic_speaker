@@ -3071,7 +3071,7 @@ void handleApiSeek() {
 
 void handleApiCurrent() {
     DynamicJsonDocument doc(512);
-    // WebServer handlers run on a single task; static throttle state is safe here.
+    // WebServer handlers run on a single task; static throttle state keeps warnings to ~1 Hz.
     static uint32_t lastAudioStatusLockLogMs = 0;
     
     doc["playing"] = (!isPaused && currentMediaType == MEDIA_AUDIO && currentFilename != "");
