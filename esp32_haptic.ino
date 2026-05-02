@@ -904,7 +904,10 @@ void _releaseVideoFrameBuffer(uint8_t frameIndex) {
 
 void _resetVideoFrameQueues() {
     if (videoDisplayQueue) {
-        xQueueReset(videoDisplayQueue);
+        VideoPacket packet;
+        while (xQueueReceive(videoDisplayQueue, &packet, 0) == pdTRUE) {
+            // Drain display queue to avoid resetting while another task may be blocked.
+        }
     }
     if (!videoFreeFrameQueue) return;
     xQueueReset(videoFreeFrameQueue);
