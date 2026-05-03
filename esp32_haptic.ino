@@ -196,6 +196,7 @@ uint32_t videoHmjHeaderSize = 0;
 #define AUDIO_CLOCK_MAX_STEP_MS 50
 #define VIDEO_LAG_SKIP_THRESHOLD_MS 120
 #define VIDEO_LAG_CRITICAL_MS 260
+#define TJPGDEC_MUTEX_TIMEOUT_MS 40
 
 volatile bool videoCompanionAudioActive = false;
 bool videoCompanionAudioLoop = false;
@@ -1165,6 +1166,9 @@ void initDisplayVideoScaffold() {
 
     tftMutex = xSemaphoreCreateMutex();
     tjpgDecoderMutex = xSemaphoreCreateMutex();
+    if (!tjpgDecoderMutex) {
+        Serial.println("WARN: TJpgDec mutex create failed");
+    }
     displayReady = initSt7789Panel();
 
     videoRawFrameSize = (size_t)TFT_WIDTH * (size_t)TFT_HEIGHT * 2U;
@@ -1248,7 +1252,7 @@ bool initSt7789Panel() {
         Serial.println("WARN: TJpgDec mutex unavailable during panel init");
         return false;
     }
-    if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
+    if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(TJPGDEC_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         Serial.println("WARN: TJpgDec mutex timeout during panel init");
         return false;
     }
@@ -1621,7 +1625,7 @@ static void _configureTjpgDecoder() {
         Serial.println("WARN: TJpgDec mutex unavailable");
         return;
     }
-    if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
+    if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(TJPGDEC_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         Serial.println("WARN: TJpgDec mutex timeout");
         return;
     }
