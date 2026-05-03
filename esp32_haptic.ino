@@ -160,9 +160,6 @@ size_t videoMjpegDecodeBufferSize = 0;
 static uint16_t tjpgDecodeWidth = 0;
 static uint16_t tjpgDecodeHeight = 0;
 static uint16_t *tjpgDecodeTarget = NULL;
-static bool tjpgDecoderConfigured = false;
-static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
-static void _configureTjpgDecoder();
 volatile bool videoMjpegLastReadEof = false;
 volatile bool videoHmjLastReadEof = false;
 uint16_t videoHmjWidth = TFT_WIDTH;
@@ -240,6 +237,8 @@ static const TickType_t LED_DELAY_VIDEO = pdMS_TO_TICKS(50);
 SemaphoreHandle_t tftMutex = NULL;
 
 extern SemaphoreHandle_t sdMutex;
+static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
+static void _configureTjpgDecoder();
 
 // -------------------- Custom Audio Output --------------------
 // This cleanly splits a single I2S DIN wire into two independent volume-controlled channels
@@ -1600,10 +1599,8 @@ static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, ui
 }
 
 static void _configureTjpgDecoder() {
-    if (tjpgDecoderConfigured) return;
     TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
     TJpgDec.setCallback(_tjpgDecodeToBuffer);
-    tjpgDecoderConfigured = true;
 }
 
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
