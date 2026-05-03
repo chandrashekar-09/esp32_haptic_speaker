@@ -180,6 +180,7 @@ uint32_t videoHmjHeaderSize = 0;
 #define HMJ_MAGIC_2 'J'
 #define HMJ_MAGIC_3 '1'
 #define RGB_RAW_FIXED_FPS 15
+// Swap RGB565 byte order for video frames (raw + MJPEG decode).
 #define MJPEG_SWAP_RGB565_BYTES 1
 #define MJPEG_FLIP_X 0
 #define MJPEG_FLIP_Y 0
@@ -424,6 +425,7 @@ void taskVideoDecode(void *pvParameters);
 void taskDisplayFlush(void *pvParameters);
 void initDisplayVideoScaffold();
 bool initSt7789Panel();
+static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
 void st7789FillColor(uint16_t color);
 void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height);
 bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t sessionId);
@@ -1235,8 +1237,8 @@ void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t he
 bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
-    tft.setSwapBytes(true);
-    TJpg_Decoder.setSwapBytes(false);
+    tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    TJpg_Decoder.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
     TJpg_Decoder.setJpgScale(1);
     TJpg_Decoder.setCallback(_tjpgDecodeToBuffer);
     tft.fillScreen(TFT_BLACK);
@@ -1501,7 +1503,13 @@ bool _readRawFrameToBuffer(uint8_t frameIndex) {
     int readLen = videoRawFile.read(videoFrameBuffers[frameIndex], videoRawFrameSize);
     xSemaphoreGive(sdMutex);
     _videoSdReadEnd();
-    return readLen == (int)videoRawFrameSize;
+    if (readLen != (int)videoRawFrameSize) {
+        return false;
+    }
+    if (MJPEG_SWAP_RGB565_BYTES) {
+        _swapRgb565Buffer(videoFrameBuffers[frameIndex], videoRawFrameSize);
+    }
+    return true;
 }
 
 bool _skipRawFrames(uint32_t frameCount) {
@@ -1555,6 +1563,15 @@ static uint8_t _selectJpgScale(uint16_t width, uint16_t height) {
         return 4;
     }
     return 8;
+}
+
+static inline void _swapRgb565Buffer(uint8_t *buffer, size_t byteCount) {
+    if (!buffer || byteCount < 2) return;
+    for (size_t i = 0; i + 1 < byteCount; i += 2) {
+        uint8_t tmp = buffer[i];
+        buffer[i] = buffer[i + 1];
+        buffer[i + 1] = tmp;
+    }
 }
 
 static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap) {
