@@ -161,7 +161,6 @@ static uint16_t tjpgDecodeWidth = 0;
 static uint16_t tjpgDecodeHeight = 0;
 static uint16_t *tjpgDecodeTarget = NULL;
 static bool tjpgDecoderConfigured = false;
-static portMUX_TYPE tjpgDecoderMux = portMUX_INITIALIZER_UNLOCKED;
 volatile bool videoMjpegLastReadEof = false;
 volatile bool videoHmjLastReadEof = false;
 uint16_t videoHmjWidth = TFT_WIDTH;
@@ -1601,14 +1600,10 @@ static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, ui
 
 static void _configureTjpgDecoder() {
     if (tjpgDecoderConfigured) return;
-    portENTER_CRITICAL(&tjpgDecoderMux);
-    if (!tjpgDecoderConfigured) {
-        TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-        TJpgDec.setCallback(_tjpgDecodeToBuffer);
-        TJpgDec.setJpgScale(1);
-        tjpgDecoderConfigured = true;
-    }
-    portEXIT_CRITICAL(&tjpgDecoderMux);
+    TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    TJpgDec.setCallback(_tjpgDecodeToBuffer);
+    TJpgDec.setJpgScale(1);
+    tjpgDecoderConfigured = true;
 }
 
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
