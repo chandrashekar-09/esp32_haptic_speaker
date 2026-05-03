@@ -1609,21 +1609,31 @@ static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, ui
     return true;
 }
 
+static inline void _applyTjpgDecoderConfig() {
+    TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setCallback(_tjpgDecodeToBuffer);
+}
+
 static void _configureTjpgDecoder() {
     if (tjpgDecoderMutex) {
-        if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) return;
+        if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
+            static uint32_t lastWarnMs = 0;
+            uint32_t now = millis();
+            if ((now - lastWarnMs) >= 1000U) {
+                Serial.println("WARN: TJpgDec mutex timeout");
+                lastWarnMs = now;
+            }
+            return;
+        }
         if (!tjpgDecoderConfigured) {
-            TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-            TJpgDec.setJpgScale(1);
-            TJpgDec.setCallback(_tjpgDecodeToBuffer);
+            _applyTjpgDecoderConfig();
             tjpgDecoderConfigured = true;
         }
         xSemaphoreGive(tjpgDecoderMutex);
     } else {
         if (tjpgDecoderConfigured) return;
-        TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-        TJpgDec.setJpgScale(1);
-        TJpgDec.setCallback(_tjpgDecodeToBuffer);
+        _applyTjpgDecoderConfig();
         tjpgDecoderConfigured = true;
     }
 }
