@@ -160,6 +160,9 @@ size_t videoMjpegDecodeBufferSize = 0;
 static uint16_t tjpgDecodeWidth = 0;
 static uint16_t tjpgDecodeHeight = 0;
 static uint16_t *tjpgDecodeTarget = NULL;
+static bool tjpgDecoderConfigured = false;
+static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
+static void _configureTjpgDecoder();
 volatile bool videoMjpegLastReadEof = false;
 volatile bool videoHmjLastReadEof = false;
 uint16_t videoHmjWidth = TFT_WIDTH;
@@ -1239,9 +1242,8 @@ bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    _configureTjpgDecoder();
     TJpgDec.setJpgScale(1);
-    TJpgDec.setCallback(_tjpgDecodeToBuffer);
     tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
     return true;
@@ -1597,9 +1599,17 @@ static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, ui
     return true;
 }
 
+static void _configureTjpgDecoder() {
+    if (tjpgDecoderConfigured) return;
+    TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    TJpgDec.setCallback(_tjpgDecodeToBuffer);
+    tjpgDecoderConfigured = true;
+}
+
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
     if (!jpegData || jpegSize < 4 || frameIndex >= VIDEO_FRAME_BUFFER_COUNT) return false;
     if (!videoFrameBuffers[frameIndex]) return false;
+    _configureTjpgDecoder();
 
     uint16_t jpegWidth = 0;
     uint16_t jpegHeight = 0;
