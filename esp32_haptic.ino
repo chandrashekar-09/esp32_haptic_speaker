@@ -1239,9 +1239,9 @@ bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    TJpg_Decoder.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    TJpg_Decoder.setJpgScale(1);
-    TJpg_Decoder.setCallback(_tjpgDecodeToBuffer);
+    TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    TJpgDec.setJpgScale(1);
+    TJpgDec.setCallback(_tjpgDecodeToBuffer);
     tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
     return true;
@@ -1603,12 +1603,12 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
 
     uint16_t jpegWidth = 0;
     uint16_t jpegHeight = 0;
-    if (!TJpg_Decoder.getJpgSize(&jpegWidth, &jpegHeight, jpegData, jpegSize) || jpegWidth == 0 || jpegHeight == 0) {
+    if (!TJpgDec.getJpgSize(&jpegWidth, &jpegHeight, jpegData, jpegSize) || jpegWidth == 0 || jpegHeight == 0) {
         return false;
     }
 
     uint8_t scale = _selectJpgScale(jpegWidth, jpegHeight);
-    TJpg_Decoder.setJpgScale(scale);
+    TJpgDec.setJpgScale(scale);
 
     uint16_t scaledWidth = (uint16_t)((jpegWidth + scale - 1U) / scale);
     uint16_t scaledHeight = (uint16_t)((jpegHeight + scale - 1U) / scale);
@@ -1641,7 +1641,7 @@ static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, u
     tjpgDecodeHeight = scaledHeight;
     memset(decodeTarget, 0x00, requiredBytes);
 
-    bool decodeOk = TJpg_Decoder.drawJpg(0, 0, jpegData, jpegSize);
+    bool decodeOk = TJpgDec.drawJpg(0, 0, jpegData, jpegSize);
     tjpgDecodeTarget = NULL;
     if (!decodeOk) {
         return false;
