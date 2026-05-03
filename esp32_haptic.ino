@@ -1244,15 +1244,19 @@ bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    if (tjpgDecoderMutex) {
-        if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
-            return false;
-        }
-        tjpgDecoderConfigured = false;
-        xSemaphoreGive(tjpgDecoderMutex);
-    } else {
-        tjpgDecoderConfigured = false;
+    if (!tjpgDecoderMutex) {
+        tjpgDecoderMutex = xSemaphoreCreateMutex();
     }
+    if (!tjpgDecoderMutex) {
+        Serial.println("WARN: TJpgDec mutex unavailable during panel init");
+        return false;
+    }
+    if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
+        Serial.println("WARN: TJpgDec mutex timeout during panel init");
+        return false;
+    }
+    tjpgDecoderConfigured = false;
+    xSemaphoreGive(tjpgDecoderMutex);
     _configureTjpgDecoder();
     tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
@@ -1616,26 +1620,27 @@ static inline void _applyTjpgDecoderConfig() {
 }
 
 static void _configureTjpgDecoder() {
-    if (tjpgDecoderMutex) {
-        if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
-            static uint32_t lastWarnMs = 0;
-            uint32_t now = millis();
-            if ((now - lastWarnMs) >= 1000U) {
-                Serial.println("WARN: TJpgDec mutex timeout");
-                lastWarnMs = now;
-            }
-            return;
+    if (!tjpgDecoderMutex) {
+        tjpgDecoderMutex = xSemaphoreCreateMutex();
+    }
+    if (!tjpgDecoderMutex) {
+        Serial.println("WARN: TJpgDec mutex unavailable");
+        return;
+    }
+    if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
+        static uint32_t lastWarnMs = 0;
+        uint32_t now = millis();
+        if ((now - lastWarnMs) >= 1000U) {
+            Serial.println("WARN: TJpgDec mutex timeout");
+            lastWarnMs = now;
         }
-        if (!tjpgDecoderConfigured) {
-            _applyTjpgDecoderConfig();
-            tjpgDecoderConfigured = true;
-        }
-        xSemaphoreGive(tjpgDecoderMutex);
-    } else {
-        if (tjpgDecoderConfigured) return;
+        return;
+    }
+    if (!tjpgDecoderConfigured) {
         _applyTjpgDecoderConfig();
         tjpgDecoderConfigured = true;
     }
+    xSemaphoreGive(tjpgDecoderMutex);
 }
 
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
