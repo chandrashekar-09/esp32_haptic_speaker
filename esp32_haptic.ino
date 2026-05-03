@@ -1245,9 +1245,6 @@ bool initSt7789Panel() {
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
     if (!tjpgDecoderMutex) {
-        tjpgDecoderMutex = xSemaphoreCreateMutex();
-    }
-    if (!tjpgDecoderMutex) {
         Serial.println("WARN: TJpgDec mutex unavailable during panel init");
         return false;
     }
@@ -1621,19 +1618,11 @@ static inline void _applyTjpgDecoderConfig() {
 
 static void _configureTjpgDecoder() {
     if (!tjpgDecoderMutex) {
-        tjpgDecoderMutex = xSemaphoreCreateMutex();
-    }
-    if (!tjpgDecoderMutex) {
         Serial.println("WARN: TJpgDec mutex unavailable");
         return;
     }
     if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
-        static uint32_t lastWarnMs = 0;
-        uint32_t now = millis();
-        if ((now - lastWarnMs) >= 1000U) {
-            Serial.println("WARN: TJpgDec mutex timeout");
-            lastWarnMs = now;
-        }
+        Serial.println("WARN: TJpgDec mutex timeout");
         return;
     }
     if (!tjpgDecoderConfigured) {
