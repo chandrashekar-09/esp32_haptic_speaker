@@ -1242,6 +1242,7 @@ bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+    tjpgDecoderConfigured = false;
     _configureTjpgDecoder();
     tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
@@ -1601,8 +1602,8 @@ static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, ui
 static void _configureTjpgDecoder() {
     if (tjpgDecoderConfigured) return;
     TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    TJpgDec.setCallback(_tjpgDecodeToBuffer);
     TJpgDec.setJpgScale(1);
+    TJpgDec.setCallback(_tjpgDecodeToBuffer);
     tjpgDecoderConfigured = true;
 }
 
