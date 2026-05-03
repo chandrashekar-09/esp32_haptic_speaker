@@ -241,7 +241,7 @@ SemaphoreHandle_t tjpgDecoderMutex = NULL;
 
 extern SemaphoreHandle_t sdMutex;
 static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
-static void _configureTjpgDecoder();
+static bool _configureTjpgDecoder();
 
 // -------------------- Custom Audio Output --------------------
 // This cleanly splits a single I2S DIN wire into two independent volume-controlled channels
@@ -1167,7 +1167,7 @@ void initDisplayVideoScaffold() {
     tftMutex = xSemaphoreCreateMutex();
     tjpgDecoderMutex = xSemaphoreCreateMutex();
     if (!tjpgDecoderMutex) {
-        Serial.println("WARN: TJpgDec mutex create failed");
+        Serial.println("WARN: TJpgDec mutex create failed - video decoding may be unsafe");
     }
     displayReady = initSt7789Panel();
 
@@ -1257,8 +1257,9 @@ bool initSt7789Panel() {
         return false;
     }
     tjpgDecoderConfigured = false;
+    _applyTjpgDecoderConfig();
+    tjpgDecoderConfigured = true;
     xSemaphoreGive(tjpgDecoderMutex);
-    _configureTjpgDecoder();
     tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
     return true;
@@ -1620,26 +1621,27 @@ static inline void _applyTjpgDecoderConfig() {
     TJpgDec.setCallback(_tjpgDecodeToBuffer);
 }
 
-static void _configureTjpgDecoder() {
+static bool _configureTjpgDecoder() {
     if (!tjpgDecoderMutex) {
         Serial.println("WARN: TJpgDec mutex unavailable");
-        return;
+        return false;
     }
     if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(TJPGDEC_MUTEX_TIMEOUT_MS)) != pdTRUE) {
         Serial.println("WARN: TJpgDec mutex timeout");
-        return;
+        return false;
     }
     if (!tjpgDecoderConfigured) {
         _applyTjpgDecoderConfig();
         tjpgDecoderConfigured = true;
     }
     xSemaphoreGive(tjpgDecoderMutex);
+    return true;
 }
 
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
     if (!jpegData || jpegSize < 4 || frameIndex >= VIDEO_FRAME_BUFFER_COUNT) return false;
     if (!videoFrameBuffers[frameIndex]) return false;
-    _configureTjpgDecoder();
+    if (!_configureTjpgDecoder()) return false;
 
     uint16_t jpegWidth = 0;
     uint16_t jpegHeight = 0;
