@@ -426,6 +426,7 @@ void taskDisplayFlush(void *pvParameters);
 void initDisplayVideoScaffold();
 bool initSt7789Panel();
 static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
+static inline void _swapRgb565Buffer(uint8_t *buffer, size_t byteCount);
 void st7789FillColor(uint16_t color);
 void st7789DrawFrameRGB565(const uint8_t *frameData, uint16_t width, uint16_t height);
 bool _startVideoPlayback(const String& filename, bool loopRequested, uint32_t sessionId);
