@@ -1244,7 +1244,10 @@ bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    if (tjpgDecoderMutex && xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) == pdTRUE) {
+    if (tjpgDecoderMutex) {
+        if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) {
+            return false;
+        }
         tjpgDecoderConfigured = false;
         xSemaphoreGive(tjpgDecoderMutex);
     } else {
@@ -1616,14 +1619,13 @@ static void _configureTjpgDecoder() {
             tjpgDecoderConfigured = true;
         }
         xSemaphoreGive(tjpgDecoderMutex);
-        return;
+    } else {
+        if (tjpgDecoderConfigured) return;
+        TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+        TJpgDec.setJpgScale(1);
+        TJpgDec.setCallback(_tjpgDecodeToBuffer);
+        tjpgDecoderConfigured = true;
     }
-
-    if (tjpgDecoderConfigured) return;
-    TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    TJpgDec.setJpgScale(1);
-    TJpgDec.setCallback(_tjpgDecodeToBuffer);
-    tjpgDecoderConfigured = true;
 }
 
 static bool _decodeJpegToFrameBuffer(const uint8_t *jpegData, size_t jpegSize, uint8_t frameIndex, bool displayNative = false) {
