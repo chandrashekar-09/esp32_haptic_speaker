@@ -236,6 +236,7 @@ static const TickType_t LED_DELAY_NORMAL = pdMS_TO_TICKS(30);
 static const TickType_t LED_DELAY_VIDEO = pdMS_TO_TICKS(50);
 
 SemaphoreHandle_t tftMutex = NULL;
+SemaphoreHandle_t tjpgDecoderMutex = NULL;
 
 extern SemaphoreHandle_t sdMutex;
 static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t *bitmap);
@@ -1163,6 +1164,7 @@ void initDisplayVideoScaffold() {
     digitalWrite(TFT_BL, HIGH);
 
     tftMutex = xSemaphoreCreateMutex();
+    tjpgDecoderMutex = xSemaphoreCreateMutex();
     displayReady = initSt7789Panel();
 
     videoRawFrameSize = (size_t)TFT_WIDTH * (size_t)TFT_HEIGHT * 2U;
@@ -1242,7 +1244,12 @@ bool initSt7789Panel() {
     tft.init();
     tft.setRotation(0);
     tft.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
-    tjpgDecoderConfigured = false;
+    if (tjpgDecoderMutex && xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) == pdTRUE) {
+        tjpgDecoderConfigured = false;
+        xSemaphoreGive(tjpgDecoderMutex);
+    } else {
+        tjpgDecoderConfigured = false;
+    }
     _configureTjpgDecoder();
     tft.fillScreen(TFT_BLACK);
     digitalWrite(TFT_BL, HIGH);
@@ -1600,6 +1607,18 @@ static bool _tjpgDecodeToBuffer(int16_t x, int16_t y, uint16_t w, uint16_t h, ui
 }
 
 static void _configureTjpgDecoder() {
+    if (tjpgDecoderMutex) {
+        if (xSemaphoreTake(tjpgDecoderMutex, pdMS_TO_TICKS(40)) != pdTRUE) return;
+        if (!tjpgDecoderConfigured) {
+            TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
+            TJpgDec.setJpgScale(1);
+            TJpgDec.setCallback(_tjpgDecodeToBuffer);
+            tjpgDecoderConfigured = true;
+        }
+        xSemaphoreGive(tjpgDecoderMutex);
+        return;
+    }
+
     if (tjpgDecoderConfigured) return;
     TJpgDec.setSwapBytes(MJPEG_SWAP_RGB565_BYTES != 0);
     TJpgDec.setJpgScale(1);
