@@ -9,6 +9,8 @@
 #include <WebServer.h>
 #include <jpeg_decoder.h>
 
+#include "OtaService.h"  // OTA Service
+
 // ESP-IDF Low-Level I2S
 #include <driver/i2s_std.h>
 #include <driver/gpio.h>
@@ -53,9 +55,28 @@
 #define LED_PIN  40
 #define NUM_LEDS 24
 
-// -------------------- WiFi --------------------
+// ------------OTA and Wi-Fi Config----------------------//
+
+ 
 const char* ssid = "IIIT-Guest";
 const char* password = "f6s68VHJ89mC";
+
+const int CURRENT_VERSION = 1;
+const char* versionUrl = "https://raw.githubusercontent.com/chandrashekar-09/esp32_haptic_speaker/main/var.txt";
+const char* firmwareUrl = "https://raw.githubusercontent.com/chandrashekar-09/esp32_haptic_speaker/main/firmware.bin";
+const char* deviceId = "ehs-001";
+
+const char* firebaseBootAckBaseUrl = nullptr;
+const char* firebaseAuthToken = "";
+
+const OtaConfig otaConfig = {
+		CURRENT_VERSION,
+		versionUrl,
+		firmwareUrl,
+		deviceId,
+		firebaseBootAckBaseUrl,
+		firebaseAuthToken,
+};
 
 // -------------------- Globals --------------------
 WebServer server(80);
@@ -470,51 +491,51 @@ SemaphoreHandle_t sdMutex = NULL;
 SemaphoreHandle_t audioMutex = NULL;
 
 // -------------------- Loop (Core 1) --------------------
-#line 472 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 493 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void _stopAudioSafely();
-#line 641 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 662 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 bool _startAudioPlayback(const String& filename, bool loopRequested, uint32_t startByte, bool updateMediaState, uint32_t sessionId);
-#line 828 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 849 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 bool _enqueueAudioCommand(const AudioCommandMessage &cmd, uint32_t timeoutMs);
-#line 863 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 884 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static uint16_t _readLe16(const uint8_t *p);
-#line 867 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 888 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static uint32_t _readLe32(const uint8_t *p);
-#line 874 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 895 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static bool _readFileExact(File &file, uint8_t *buffer, size_t len);
-#line 886 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 907 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static void _recordMovingAverage(volatile uint32_t &lastMs, volatile uint32_t &avgMs, volatile uint32_t &maxMs, uint32_t sampleMs);
-#line 894 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 915 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static bool _packetUsesFrameBuffer(const VideoPacket &packet);
-#line 955 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 976 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void _setUploadTaskSuspension(bool suspendTasks);
-#line 971 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 992 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static bool _pumpMp3Playback(bool isCompanionDuringVideo, uint32_t &lastVideoAudioPumpMs);
-#line 1007 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 1028 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void taskWebServer(void *pvParameters);
-#line 1018 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 1039 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void taskAudio(void *pvParameters);
-#line 1113 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 1134 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void taskLEDs(void *pvParameters);
-#line 1705 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 1726 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 static esp_jpeg_image_scale_t _selectJpegScale(uint16_t width, uint16_t height);
-#line 2672 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 2693 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void setup();
-#line 2848 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 2876 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void loop();
-#line 3432 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 3460 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void _setUploadError(const String &msg);
-#line 3439 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 3467 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 bool _getSdStatsLocked(uint64_t *totalBytes, uint64_t *usedBytes);
-#line 3451 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 3479 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 String _formatSdSpaceLocked();
-#line 3485 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 3513 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 size_t _writeUploadChunkLocked(const uint8_t *data, size_t len);
-#line 3539 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 3567 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 bool _ensureUploadWorker();
-#line 3564 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 3592 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 bool _enqueueUploadWorkRaw(const void *itemPtr, const char *context);
-#line 472 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
+#line 493 "/home/chandrashekar/Arduino/esp32_haptic/esp32_haptic.ino"
 void _stopAudioSafely() {
     if (audioMutex) {
         // Callers only invoke stop after releasing audioMutex, so blocking here is safe.
@@ -2764,21 +2785,28 @@ void setup() {
     // Connect WiFi
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    Serial.print("Connecting to WiFi");
     
-    int retries = 0;
-    while (WiFi.status() != WL_CONNECTED && retries < 20) {
-        delay(500);
-        Serial.print(".");
-        retries++;
+	Serial.print("connecting to wifi: ");
+	Serial.print(ssid);
+
+	while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
     }
-    
-    if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\nWiFi connected.");
-        Serial.println(WiFi.localIP());
-    } else {
-        Serial.println("\nWiFi connection failed! Proceeding anyway...");
-    }
+	
+    Serial.println("\nwifi connected");
+	Serial.println(WiFi.localIP());
+
+    check_ota(otaConfig); //check for updates and apply if available
+
+	StaticJsonDocument<256> payload;
+	payload["device_id"] = deviceId;
+	payload["fw_version"] = CURRENT_VERSION;
+	payload["local_ip"] = WiFi.localIP().toString();
+	payload["ssid"] = WiFi.SSID();
+	payload["rssi"] = WiFi.RSSI();
+
+	send_ota_ack(otaConfig, payload); //send boot ack with device info
 
     // Setup routes
     server.on("/api/media/files", HTTP_GET, handleApiFiles);

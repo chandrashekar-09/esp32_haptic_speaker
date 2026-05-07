@@ -387,6 +387,7 @@
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/middleware/Middleware.h \
  /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/WebServer/src/detail/RequestHandler.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/espressif__esp_jpeg/include/jpeg_decoder.h \
+ /home/chandrashekar/Arduino/esp32_haptic/build/sketch/OtaService.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_driver_i2s/include/driver/i2s_std.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/hal/include/hal/i2s_types.h \
  /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_driver_i2s/include/driver/i2s_common.h \

@@ -65,6 +65,26 @@
     "Includepath": null
   },
   {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/OtaService.cpp",
+    "Include": "HTTPClient.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/HTTPClient/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/OtaService.cpp",
+    "Include": "NetworkClientSecure.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/OtaService.cpp",
+    "Include": "Update.h",
+    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Update/src"
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/Arduino/esp32_haptic/build/sketch/OtaService.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
     "Sourcefile": "/home/chandrashekar/Arduino/libraries/FastLED/src/FastLED.cpp",
     "Include": "",
     "Includepath": null
@@ -918,16 +938,6 @@
     "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceFunction.cpp",
     "Include": "",
     "Includepath": null
-  },
-  {
-    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceHTTPStream.cpp",
-    "Include": "HTTPClient.h",
-    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/HTTPClient/src"
-  },
-  {
-    "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceHTTPStream.cpp",
-    "Include": "NetworkClientSecure.h",
-    "Includepath": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src"
   },
   {
     "Sourcefile": "/home/chandrashekar/Arduino/libraries/ESP8266Audio/src/AudioFileSourceHTTPStream.cpp",
@@ -1975,6 +1985,36 @@
     "Includepath": null
   },
   {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/HTTPClient/src/HTTPClient.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/NetworkClientSecure.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/ssl_client.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Update/src/HttpsOTAUpdate.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Update/src/Updater.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
+    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Update/src/Updater_Signing.cpp",
+    "Include": "",
+    "Includepath": null
+  },
+  {
     "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/Hash/src/PBKDF2_HMACBuilder.cpp",
     "Include": "",
     "Includepath": null
@@ -1996,21 +2036,6 @@
   },
   {
     "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/SPIFFS/src/SPIFFS.cpp",
-    "Include": "",
-    "Includepath": null
-  },
-  {
-    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/HTTPClient/src/HTTPClient.cpp",
-    "Include": "",
-    "Includepath": null
-  },
-  {
-    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/NetworkClientSecure.cpp",
-    "Include": "",
-    "Includepath": null
-  },
-  {
-    "Sourcefile": "/home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/libraries/NetworkClientSecure/src/ssl_client.cpp",
     "Include": "",
     "Includepath": null
   },
