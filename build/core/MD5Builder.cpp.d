@@ -1,0 +1,19 @@
+/home/chandrashekar/Arduino/esp32_haptic/build/core/MD5Builder.cpp.o: \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/MD5Builder.cpp \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/HEXBuilder.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/WString.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/pgmspace.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Stream.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Print.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/newlib/platform_include/stdio.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/WString.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/Printable.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/MD5Builder.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_system/include/esp_system.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_err.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_compiler.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_attr.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_bit_defs.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_common/include/esp_idf_version.h \
+ /home/chandrashekar/.arduino15/packages/esp32/tools/esp32s3-libs/3.3.7/include/esp_rom/include/esp_rom_md5.h \
+ /home/chandrashekar/.arduino15/packages/esp32/hardware/esp32/3.3.7/cores/esp32/HashBuilder.h

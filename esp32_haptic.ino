@@ -60,7 +60,7 @@
 const char* ssid = "IIIT-Guest";
 const char* password = "f6s68VHJ89mC";
 
-const int CURRENT_VERSION = 1;
+const int CURRENT_VERSION = 2;
 const char* versionUrl = "https://raw.githubusercontent.com/chandrashekar-09/esp32_haptic_speaker/main/var.txt";
 const char* firmwareUrl = "https://raw.githubusercontent.com/chandrashekar-09/esp32_haptic_speaker/main/firmware.bin";
 const char* deviceId = "ehs-001";
@@ -188,7 +188,7 @@ uint32_t videoHmjHeaderSize = 0;
 #define MJPEG_MAX_FRAME_BYTES (300U * 1024U)
 #define MJPEG_DECODE_MAX_PIXELS (320U * 320U)
 #define MJPEG_READ_CHUNK_BYTES 8192
-#define MJPEG_DEFAULT_FPS 12
+#define MJPEG_DEFAULT_FPS 6
 #define HMJ_HEADER_BYTES 16
 #define HMJ_FRAME_HEADER_BYTES 8
 #define HMJ_MAGIC_0 'H'

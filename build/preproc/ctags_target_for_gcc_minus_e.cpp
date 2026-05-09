@@ -38,7 +38,7 @@
 const char* ssid = "IIIT-Guest";
 const char* password = "f6s68VHJ89mC";
 
-const int CURRENT_VERSION = 1;
+const int CURRENT_VERSION = 2;
 const char* versionUrl = "https://raw.githubusercontent.com/chandrashekar-09/esp32_haptic_speaker/main/var.txt";
 const char* firmwareUrl = "https://raw.githubusercontent.com/chandrashekar-09/esp32_haptic_speaker/main/firmware.bin";
 const char* deviceId = "ehs-001";
@@ -2149,7 +2149,7 @@ bool _openMjpegStream(const String& filename) {
         if (!videoMjpegFile) break;
 
         videoMjpegLastReadEof = false;
-        videoTargetFps = 12;
+        videoTargetFps = 6;
         ok = true;
     } while (false);
 
